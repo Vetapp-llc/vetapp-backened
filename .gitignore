@@ -1,0 +1,21 @@
+# Environment / secrets
+.env
+*.txt
+
+# Binaries
+bin/
+tmp/
+/server
+/sync
+/verify
+/paystats
+
+# Generated swagger docs
+docs/docs.go
+docs/swagger.json
+docs/swagger.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
