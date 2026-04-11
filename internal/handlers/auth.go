@@ -78,6 +78,8 @@ type UserResponse struct {
 // @Failure 401 {object} ErrorResponse
 // @Router /auth/login [post]
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	log := middleware.RequestLogger(r)
+
 	var req LoginRequest
 	if err := decodeAndValidate(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
@@ -87,6 +89,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Find user by email
 	var user models.User
 	if err := h.db.Where("email = ?", req.Email).First(&user).Error; err != nil {
+		log.Warn("login_failed", "email", req.Email, "reason", "user_not_found")
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid credentials"})
 		return
 	}
@@ -94,11 +97,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Decrypt stored password and compare (MySQL AES_ENCRYPT format)
 	storedPassword, err := h.authService.DecryptPassword(user.Password)
 	if err != nil {
+		log.Error("login_failed", "email", req.Email, "reason", "decrypt_error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "authentication error"})
 		return
 	}
 
 	if storedPassword != req.Password {
+		log.Warn("login_failed", "email", req.Email, "reason", "invalid_password")
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid credentials"})
 		return
 	}
@@ -106,6 +111,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Generate token pair
 	tokens, err := h.authService.GenerateTokenPair(&user)
 	if err != nil {
+		log.Error("login_failed", "email", req.Email, "reason", "token_generation", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to generate tokens"})
 		return
 	}
@@ -113,6 +119,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Update last login
 	now := time.Now()
 	h.db.Model(&user).Update("last_login", now)
+
+	log.Info("login_success", "email", req.Email, "user_id", user.ID, "clinic", user.Zip)
 
 	writeJSON(w, http.StatusOK, LoginResponse{
 		AccessToken:  tokens.AccessToken,
@@ -131,6 +139,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 // @Failure 409 {object} ErrorResponse
 // @Router /auth/register [post]
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	log := middleware.RequestLogger(r)
+
 	var req RegisterRequest
 	if err := decodeAndValidate(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
@@ -140,6 +150,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	// Check if email already exists
 	var existing models.User
 	if err := h.db.Where("email = ?", req.Email).First(&existing).Error; err == nil {
+		log.Warn("register_failed", "email", req.Email, "reason", "email_exists")
 		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "email already registered"})
 		return
 	}
@@ -147,6 +158,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	// Encrypt password (MySQL AES_ENCRYPT compatible)
 	encryptedBytes, err := h.authService.EncryptPassword(req.Password)
 	if err != nil {
+		log.Error("register_failed", "email", req.Email, "reason", "encrypt_error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to encrypt password"})
 		return
 	}
@@ -169,6 +181,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.Create(&user).Error; err != nil {
+		log.Error("register_failed", "email", req.Email, "reason", "db_error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to create user"})
 		return
 	}
@@ -176,9 +189,12 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	// Generate tokens
 	tokens, err := h.authService.GenerateTokenPair(&user)
 	if err != nil {
+		log.Error("register_failed", "email", req.Email, "reason", "token_generation", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to generate tokens"})
 		return
 	}
+
+	log.Info("user_registered", "email", req.Email, "user_id", user.ID, "clinic", req.Zip)
 
 	writeJSON(w, http.StatusCreated, LoginResponse{
 		AccessToken:  tokens.AccessToken,
@@ -197,6 +213,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 // @Failure 401 {object} ErrorResponse
 // @Router /auth/refresh [post]
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	log := middleware.RequestLogger(r)
+
 	var req RefreshRequest
 	if err := decodeAndValidate(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
@@ -206,6 +224,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	// Validate refresh token
 	claims, err := h.authService.ValidateRefreshToken(req.RefreshToken)
 	if err != nil {
+		log.Warn("refresh_failed", "reason", "invalid_token", "error", err)
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid or expired refresh token"})
 		return
 	}
@@ -213,6 +232,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	// Look up user
 	var user models.User
 	if err := h.db.First(&user, claims.UserID).Error; err != nil {
+		log.Warn("refresh_failed", "user_id", claims.UserID, "reason", "user_not_found")
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "user not found"})
 		return
 	}
@@ -220,9 +240,12 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	// Generate new token pair
 	tokens, err := h.authService.GenerateTokenPair(&user)
 	if err != nil {
+		log.Error("refresh_failed", "user_id", user.ID, "reason", "token_generation", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to generate tokens"})
 		return
 	}
+
+	log.Info("token_refreshed", "user_id", user.ID)
 
 	writeJSON(w, http.StatusOK, tokens)
 }
@@ -296,6 +319,8 @@ type PasswordResetRequest struct {
 // @Failure 500 {object} ErrorResponse
 // @Router /auth/otp/send [post]
 func (h *AuthHandler) OTPSend(w http.ResponseWriter, r *http.Request) {
+	log := middleware.RequestLogger(r)
+
 	var req OTPSendRequest
 	if err := decodeAndValidate(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
@@ -314,6 +339,7 @@ func (h *AuthHandler) OTPSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.Create(&otp).Error; err != nil {
+		log.Error("otp_send_failed", "phone", req.Phone, "reason", "db_error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to create OTP"})
 		return
 	}
@@ -321,9 +347,12 @@ func (h *AuthHandler) OTPSend(w http.ResponseWriter, r *http.Request) {
 	// Send SMS
 	msg := fmt.Sprintf("VetApp: თქვენი კოდია %s", code)
 	if err := h.smsService.Send(req.Phone, msg); err != nil {
+		log.Error("otp_send_failed", "phone", req.Phone, "reason", "sms_error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to send SMS"})
 		return
 	}
+
+	log.Info("otp_sent", "phone", req.Phone, "type", req.Type, "otp_id", otp.ID)
 
 	writeJSON(w, http.StatusOK, OTPSendResponse{OTPID: otp.ID})
 }
@@ -339,6 +368,8 @@ func (h *AuthHandler) OTPSend(w http.ResponseWriter, r *http.Request) {
 // @Failure 401 {object} ErrorResponse
 // @Router /auth/otp/verify [post]
 func (h *AuthHandler) OTPVerify(w http.ResponseWriter, r *http.Request) {
+	log := middleware.RequestLogger(r)
+
 	var req OTPVerifyRequest
 	if err := decodeAndValidate(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
@@ -347,22 +378,27 @@ func (h *AuthHandler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 
 	var otp models.OTP
 	if err := h.db.First(&otp, req.OTPID).Error; err != nil {
+		log.Warn("otp_verify_failed", "otp_id", req.OTPID, "reason", "not_found")
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid OTP"})
 		return
 	}
 
 	if otp.Used || time.Now().After(otp.ExpiresAt) {
+		log.Warn("otp_verify_failed", "otp_id", req.OTPID, "reason", "expired_or_used")
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "OTP expired or already used"})
 		return
 	}
 
 	if otp.Code != req.Code {
+		log.Warn("otp_verify_failed", "otp_id", req.OTPID, "reason", "wrong_code")
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid code"})
 		return
 	}
 
 	// Mark as used
 	h.db.Model(&otp).Update("used", true)
+
+	log.Info("otp_verified", "otp_id", req.OTPID, "phone", otp.Phone)
 
 	writeJSON(w, http.StatusOK, OTPVerifyResponse{Verified: true})
 }
@@ -380,6 +416,8 @@ func (h *AuthHandler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {object} ErrorResponse
 // @Router /auth/password-reset [post]
 func (h *AuthHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
+	log := middleware.RequestLogger(r)
+
 	var req PasswordResetRequest
 	if err := decodeAndValidate(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
@@ -389,11 +427,13 @@ func (h *AuthHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 	// Verify OTP
 	var otp models.OTP
 	if err := h.db.First(&otp, req.OTPID).Error; err != nil {
+		log.Warn("password_reset_failed", "otp_id", req.OTPID, "reason", "otp_not_found")
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid OTP"})
 		return
 	}
 
 	if otp.Used || time.Now().After(otp.ExpiresAt) || otp.Code != req.OTPCode {
+		log.Warn("password_reset_failed", "otp_id", req.OTPID, "reason", "otp_invalid")
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid or expired OTP"})
 		return
 	}
@@ -401,6 +441,7 @@ func (h *AuthHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 	// Find user by phone
 	var user models.User
 	if err := h.db.Where("phone = ?", otp.Phone).First(&user).Error; err != nil {
+		log.Warn("password_reset_failed", "phone", otp.Phone, "reason", "user_not_found")
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "user not found"})
 		return
 	}
@@ -408,17 +449,21 @@ func (h *AuthHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 	// Encrypt new password
 	encrypted, err := h.authService.EncryptPassword(req.NewPassword)
 	if err != nil {
+		log.Error("password_reset_failed", "user_id", user.ID, "reason", "encrypt_error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to encrypt password"})
 		return
 	}
 
 	if err := h.db.Model(&user).Update("password", encrypted).Error; err != nil {
+		log.Error("password_reset_failed", "user_id", user.ID, "reason", "db_error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to update password"})
 		return
 	}
 
 	// Mark OTP as used
 	h.db.Model(&otp).Update("used", true)
+
+	log.Info("password_reset", "user_id", user.ID, "phone", otp.Phone)
 
 	writeJSON(w, http.StatusOK, MessageResponse{Message: "password reset successfully"})
 }

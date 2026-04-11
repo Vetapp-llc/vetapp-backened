@@ -252,6 +252,7 @@ func (h *PetHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Router /pets [post]
 func (h *PetHandler) Create(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
+	log := middleware.RequestLogger(r)
 
 	var req CreatePetRequest
 	if err := decodeAndValidate(r, &req); err != nil {
@@ -261,6 +262,7 @@ func (h *PetHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Validate breed against known breeds for dog/cat
 	if !data.IsValidBreed(req.Pet, req.Variety) {
+		log.Warn("pet_create_failed", "reason", "invalid_breed", "species", req.Pet, "breed", req.Variety)
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid breed for this species"})
 		return
 	}
@@ -288,6 +290,7 @@ func (h *PetHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.Create(&pet).Error; err != nil {
+		log.Error("pet_create_failed", "reason", "db_error", "error", err, "name", req.Name, "owner_uuid", req.UUID)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to create pet"})
 		return
 	}
@@ -296,6 +299,8 @@ func (h *PetHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.Address != "" {
 		h.db.Model(&models.User{}).Where("last_name = ?", req.UUID).Update("address", req.Address)
 	}
+
+	log.Info("pet_created", "pet_id", pet.ID, "name", pet.Name, "species", pet.Pet, "owner_uuid", pet.UUID)
 
 	writeJSON(w, http.StatusCreated, petToListItem(pet))
 }
@@ -316,6 +321,7 @@ func (h *PetHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *PetHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	claims := middleware.GetClaims(r)
+	log := middleware.RequestLogger(r)
 
 	var pet models.Pet
 	if err := h.db.Where("id = ? AND vet = ?", id, claims.Zip).First(&pet).Error; err != nil {
@@ -333,9 +339,12 @@ func (h *PetHandler) Update(w http.ResponseWriter, r *http.Request) {
 	delete(updates, "id")
 
 	if err := h.db.Model(&pet).Updates(updates).Error; err != nil {
+		log.Error("pet_update_failed", "pet_id", id, "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to update pet"})
 		return
 	}
+
+	log.Info("pet_updated", "pet_id", id)
 
 	writeJSON(w, http.StatusOK, petToListItem(pet))
 }
@@ -353,6 +362,7 @@ func (h *PetHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *PetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	claims := middleware.GetClaims(r)
+	log := middleware.RequestLogger(r)
 
 	var pet models.Pet
 	if err := h.db.Where("id = ? AND vet = ?", id, claims.Zip).First(&pet).Error; err != nil {
@@ -361,9 +371,12 @@ func (h *PetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.Delete(&pet).Error; err != nil {
+		log.Error("pet_delete_failed", "pet_id", id, "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to delete pet"})
 		return
 	}
+
+	log.Info("pet_deleted", "pet_id", id, "name", pet.Name)
 
 	writeJSON(w, http.StatusOK, MessageResponse{Message: "pet deleted"})
 }

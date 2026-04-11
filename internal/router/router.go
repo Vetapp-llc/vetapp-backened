@@ -23,6 +23,7 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 
 	// --- Global middleware ---
 	r.Use(chimw.RealIP)
+	r.Use(chimw.RequestID)
 	r.Use(chimw.Recoverer)
 	r.Use(middleware.Logger)
 	r.Use(cors.Handler(cors.Options{

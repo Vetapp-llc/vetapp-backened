@@ -155,6 +155,8 @@ func (h *OwnerHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"vet = ? AND (uuid::text = ? OR uuid::text = ?)",
 		claims.Zip, personalID, trimmedID,
 	).Order("id DESC").Find(&pets).Error; err != nil || len(pets) == 0 {
+		log := middleware.RequestLogger(r)
+		log.Warn("owner_not_found", "personal_id", personalID)
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "owner not found"})
 		return
 	}

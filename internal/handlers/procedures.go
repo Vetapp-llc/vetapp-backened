@@ -175,6 +175,7 @@ func (h *ProcedureHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Router /procedures [post]
 func (h *ProcedureHandler) Create(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
+	log := middleware.RequestLogger(r)
 
 	var req CreateProcedureRequest
 	if err := decodeAndValidate(r, &req); err != nil {
@@ -223,9 +224,12 @@ func (h *ProcedureHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.Create(&proc).Error; err != nil {
+		log.Error("procedure_create_failed", "error", err, "type", req.TP, "pet_id", req.UUID)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to create procedure"})
 		return
 	}
+
+	log.Info("procedure_created", "id", proc.ID, "type", proc.TP, "type_name", proc.TPName, "pet_id", proc.UUID)
 
 	writeJSON(w, http.StatusCreated, proc)
 }

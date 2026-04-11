@@ -72,6 +72,7 @@ func paymentToResponse(p models.Payment) PaymentResponse {
 // @Router /payments/record [post]
 func (h *PaymentHandler) Record(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
+	log := middleware.RequestLogger(r)
 
 	var req RecordPaymentRequest
 	if err := decodeAndValidate(r, &req); err != nil {
@@ -90,6 +91,7 @@ func (h *PaymentHandler) Record(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.Create(&payment).Error; err != nil {
+		log.Error("payment_failed", "error", err, "amount", req.Amount, "method", req.Method, "pet_id", req.UUID)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to record payment"})
 		return
 	}
@@ -98,6 +100,8 @@ func (h *PaymentHandler) Record(w http.ResponseWriter, r *http.Request) {
 	if len(req.ProcedureIDs) > 0 {
 		h.db.Model(&models.Procedure{}).Where("id IN ?", req.ProcedureIDs).Update("phone", "1")
 	}
+
+	log.Info("payment_recorded", "payment_id", payment.ID, "amount", req.Amount, "method", req.Method, "procedure_ids", req.ProcedureIDs, "pet_id", req.UUID)
 
 	writeJSON(w, http.StatusCreated, paymentToResponse(payment))
 }
