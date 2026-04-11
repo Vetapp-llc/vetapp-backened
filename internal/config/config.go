@@ -64,8 +64,8 @@ func Load() (*Config, error) {
 	}
 
 	// Validate required fields
-	if cfg.DBHost == "" || cfg.DBUser == "" || cfg.DBPass == "" {
-		return nil, fmt.Errorf("DB_HOST, DB_USER, and DB_PASS are required")
+	if os.Getenv("DATABASE_URL") == "" && (cfg.DBHost == "" || cfg.DBUser == "" || cfg.DBPass == "") {
+		return nil, fmt.Errorf("DATABASE_URL or DB_HOST/DB_USER/DB_PASS are required")
 	}
 	if cfg.JWTSecret == "" {
 		return nil, fmt.Errorf("JWT_SECRET is required")
@@ -79,6 +79,9 @@ func Load() (*Config, error) {
 
 // DSN returns the PostgreSQL connection string for GORM.
 func (c *Config) DSN() string {
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		return dbURL
+	}
 	return fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		c.DBHost, c.DBPort, c.DBUser, c.DBPass, c.DBName, c.DBSSLMode,

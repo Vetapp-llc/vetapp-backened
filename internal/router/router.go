@@ -50,6 +50,7 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 	ownerPortalHandler := handlers.NewOwnerPortalHandler(db)
 	subHandler := handlers.NewSubscriptionHandler(db, ipayService)
 	notifHandler := handlers.NewNotificationHandler(db, smsService)
+	publicHandler := handlers.NewPublicHandler(db)
 
 	// --- Swagger UI ---
 	r.Get("/swagger/*", httpSwagger.WrapHandler)
@@ -72,6 +73,9 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 	// Subscription packages (public), callback (public webhook)
 	r.Get("/api/subscriptions/packages", subHandler.Packages)
 	r.Post("/api/subscriptions/callback", subHandler.Callback)
+
+	// Public pet profile (no auth — used by QR code scanning)
+	r.Get("/api/public/pets/{id}", publicHandler.GetPet)
 
 	// --- Protected routes (JWT required) ---
 	r.Route("/api", func(r chi.Router) {
