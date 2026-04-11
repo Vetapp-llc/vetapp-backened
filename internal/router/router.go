@@ -75,6 +75,7 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 	r.Post("/api/subscriptions/callback", subHandler.Callback)
 
 	// Public pet profile (no auth — used by QR code scanning)
+	r.Get("/api/public/pets/code/{code}", publicHandler.LookupByCode)
 	r.Get("/api/public/pets/{id}", publicHandler.GetPet)
 
 	// --- Protected routes (JWT required) ---

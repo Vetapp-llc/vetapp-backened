@@ -86,9 +86,39 @@ func (h *PublicHandler) GetPet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build public pet info (no owner details, no code)
+	h.writePetProfile(w, pet)
+}
+
+// LookupByCode returns public pet info by the 4-digit access code.
+// @Summary Look up pet by PIN code
+// @Tags public
+// @Produce json
+// @Param code path string true "4-digit access code"
+// @Success 200 {object} PublicPetResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /public/pets/code/{code} [get]
+func (h *PublicHandler) LookupByCode(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	if len(code) != 4 {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
+		return
+	}
+
+	var pet models.Pet
+	if err := h.db.Where("code = ?", code).First(&pet).Error; err != nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
+		return
+	}
+
+	h.writePetProfile(w, pet)
+}
+
+// writePetProfile builds and writes the public pet profile response.
+func (h *PublicHandler) writePetProfile(w http.ResponseWriter, pet models.Pet) {
+	petID := strconv.Itoa(int(pet.ID))
+
 	info := PublicPetInfo{
-		ID:        strconv.Itoa(int(pet.ID)),
+		ID:        petID,
 		Name:      pet.Name,
 		Species:   pet.Pet,
 		Breed:     pet.Variety,
@@ -109,13 +139,13 @@ func (h *PublicHandler) GetPet(w http.ResponseWriter, r *http.Request) {
 	var counts []tpCount
 	h.db.Model(&models.Procedure{}).
 		Select("tp as tp, COUNT(*) as count").
-		Where("uuid = ?", id).
+		Where("uuid = ?", petID).
 		Group("tp").
 		Scan(&counts)
 
 	// Count allergies
 	var allergyCount int64
-	h.db.Model(&models.Allergy{}).Where("uuid = ?", id).Count(&allergyCount)
+	h.db.Model(&models.Allergy{}).Where("uuid = ?", petID).Count(&allergyCount)
 
 	// Build categories — include all types that have records
 	categories := make([]ProcedureCategoryCount, 0, len(counts)+1)
