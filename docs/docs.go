@@ -2341,6 +2341,117 @@ const docTemplate = `{
                 }
             }
         },
+        "/public/pets/code/{code}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "public"
+                ],
+                "summary": "Look up pet by PIN code",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "4-digit access code",
+                        "name": "code",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.PublicPetResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/public/pets/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "public"
+                ],
+                "summary": "Get public pet profile",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Pet ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.PublicPetResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/public/pets/{id}/procedures": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "public"
+                ],
+                "summary": "Get public pet procedures",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Pet ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Procedure type",
+                        "name": "tp",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_handlers.PublicProcedureItem"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/shop": {
             "get": {
                 "security": [
@@ -2809,6 +2920,159 @@ const docTemplate = `{
                 }
             }
         },
+        "/stats/clinic/daily": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "stats"
+                ],
+                "summary": "Get daily clinic statistics",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Date (YYYY-MM-DD)",
+                        "name": "date",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Clinic code (admin only)",
+                        "name": "clinic",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.DailyClinicStats"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/stats/clinic/monthly": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "stats"
+                ],
+                "summary": "Get monthly clinic statistics",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Month (YYYY-MM)",
+                        "name": "month",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Clinic code (admin only)",
+                        "name": "clinic",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.MonthlyClinicStats"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/stats/clinic/yearly": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "stats"
+                ],
+                "summary": "Get yearly clinic statistics",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Year (YYYY)",
+                        "name": "year",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Clinic code (admin only)",
+                        "name": "clinic",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.YearlyClinicStats"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/subscriptions/callback": {
             "post": {
                 "consumes": [
@@ -3201,6 +3465,9 @@ const docTemplate = `{
                 "clinic": {
                     "type": "string"
                 },
+                "company_name": {
+                    "type": "string"
+                },
                 "count": {
                     "type": "integer"
                 }
@@ -3344,6 +3611,9 @@ const docTemplate = `{
                 "uuid"
             ],
             "properties": {
+                "address": {
+                    "type": "string"
+                },
                 "chip": {
                     "type": "string"
                 },
@@ -3373,6 +3643,9 @@ const docTemplate = `{
                 },
                 "sex": {
                     "type": "string"
+                },
+                "status": {
+                    "type": "integer"
                 },
                 "uuid": {
                     "type": "string"
@@ -3422,6 +3695,9 @@ const docTemplate = `{
                 "date3": {
                     "type": "string"
                 },
+                "deh": {
+                    "type": "string"
+                },
                 "diagn": {
                     "type": "string"
                 },
@@ -3444,6 +3720,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "price": {
+                    "type": "string"
+                },
+                "ser": {
                     "type": "string"
                 },
                 "tp": {
@@ -3537,6 +3816,29 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handlers.DailyClinicStats": {
+            "type": "object",
+            "properties": {
+                "card": {
+                    "type": "string"
+                },
+                "cash": {
+                    "type": "string"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "procedures": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handlers.ProcedureTypeRevenue"
+                    }
+                },
+                "total": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handlers.DailySummary": {
             "type": "object",
             "required": [
@@ -3560,11 +3862,26 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handlers.DailyTotal": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handlers.EctoOptionsResponse": {
             "type": "object",
             "required": [
                 "collars",
                 "drops",
+                "sprays",
                 "tablets"
             ],
             "properties": {
@@ -3575,6 +3892,12 @@ const docTemplate = `{
                     }
                 },
                 "drops": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handlers.SelectOption"
+                    }
+                },
+                "sprays": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/internal_handlers.SelectOption"
@@ -3698,6 +4021,43 @@ const docTemplate = `{
             ],
             "properties": {
                 "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.MonthlyClinicStats": {
+            "type": "object",
+            "properties": {
+                "dailyBreakdown": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handlers.DailyTotal"
+                    }
+                },
+                "month": {
+                    "type": "string"
+                },
+                "procedures": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handlers.ProcedureTypeRevenue"
+                    }
+                },
+                "total": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.MonthlyTotal": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "month": {
+                    "type": "string"
+                },
+                "total": {
                     "type": "string"
                 }
             }
@@ -3828,6 +4188,12 @@ const docTemplate = `{
                 "castrated": {
                     "type": "boolean"
                 },
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handlers.OwnerProcedureCategoryCount"
+                    }
+                },
                 "chip": {
                     "type": "string"
                 },
@@ -3841,6 +4207,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "petStatus": {
+                    "description": "\"INHABITANT\", \"ADOPTED\", \"WORKMATE\"",
                     "type": "string"
                 },
                 "sex": {
@@ -3895,6 +4265,10 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "petStatus": {
+                    "description": "\"INHABITANT\", \"ADOPTED\", \"WORKMATE\"",
+                    "type": "string"
+                },
                 "sex": {
                     "type": "string"
                 },
@@ -3907,6 +4281,20 @@ const docTemplate = `{
                 "subscriptionStatus": {
                     "description": "\"active\", \"expired\", \"unregistered\"",
                     "type": "string"
+                }
+            }
+        },
+        "internal_handlers.OwnerProcedureCategoryCount": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "tp": {
+                    "type": "integer"
                 }
             }
         },
@@ -4300,6 +4688,20 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handlers.ProcedureCategoryCount": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "tp": {
+                    "type": "integer"
+                }
+            }
+        },
         "internal_handlers.ProcedureCount": {
             "type": "object",
             "required": [
@@ -4331,6 +4733,95 @@ const docTemplate = `{
                 },
                 "tp": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_handlers.ProcedureTypeRevenue": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "string"
+                },
+                "tp": {
+                    "type": "integer"
+                },
+                "tpname": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.PublicPetInfo": {
+            "type": "object",
+            "properties": {
+                "birth": {
+                    "type": "string"
+                },
+                "breed": {
+                    "type": "string"
+                },
+                "castrated": {
+                    "type": "boolean"
+                },
+                "chip": {
+                    "type": "string"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "sex": {
+                    "type": "string"
+                },
+                "species": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.PublicPetResponse": {
+            "type": "object",
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handlers.ProcedureCategoryCount"
+                    }
+                },
+                "pet": {
+                    "$ref": "#/definitions/internal_handlers.PublicPetInfo"
+                }
+            }
+        },
+        "internal_handlers.PublicProcedureItem": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string"
+                },
+                "diagnosis": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nextDate": {
+                    "type": "string"
+                },
+                "notes": {
+                    "type": "string"
+                },
+                "vetName": {
+                    "type": "string"
                 }
             }
         },
@@ -4640,6 +5131,29 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handlers.YearlyClinicStats": {
+            "type": "object",
+            "properties": {
+                "monthlyBreakdown": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handlers.MonthlyTotal"
+                    }
+                },
+                "procedures": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handlers.ProcedureTypeRevenue"
+                    }
+                },
+                "total": {
+                    "type": "string"
+                },
+                "year": {
+                    "type": "string"
+                }
+            }
+        },
         "vetapp-backend_internal_models.Procedure": {
             "type": "object",
             "properties": {
@@ -4665,6 +5179,10 @@ const docTemplate = `{
                 },
                 "date3": {
                     "description": "Reminder date",
+                    "type": "string"
+                },
+                "deh": {
+                    "description": "Dehel drug / test result (Canine Babesia)",
                     "type": "string"
                 },
                 "diagn": {
@@ -4700,6 +5218,10 @@ const docTemplate = `{
                 },
                 "price": {
                     "description": "Price in GEL",
+                    "type": "string"
+                },
+                "ser": {
+                    "description": "Vaccine serial/batch number",
                     "type": "string"
                 },
                 "sk": {

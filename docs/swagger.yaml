@@ -179,6 +179,8 @@ definitions:
     properties:
       clinic:
         type: string
+      company_name:
+        type: string
       count:
         type: integer
     required:
@@ -281,6 +283,8 @@ definitions:
     type: object
   internal_handlers.CreatePetRequest:
     properties:
+      address:
+        type: string
       chip:
         type: string
       code:
@@ -301,6 +305,8 @@ definitions:
         type: string
       sex:
         type: string
+      status:
+        type: integer
       uuid:
         type: string
       variety:
@@ -333,6 +339,8 @@ definitions:
         type: string
       date3:
         type: string
+      deh:
+        type: string
       diagn:
         type: string
       koment:
@@ -348,6 +356,8 @@ definitions:
       pname:
         type: string
       price:
+        type: string
+      ser:
         type: string
       tp:
         minimum: 1
@@ -414,6 +424,21 @@ definitions:
     - last_name
     - password
     type: object
+  internal_handlers.DailyClinicStats:
+    properties:
+      card:
+        type: string
+      cash:
+        type: string
+      date:
+        type: string
+      procedures:
+        items:
+          $ref: '#/definitions/internal_handlers.ProcedureTypeRevenue'
+        type: array
+      total:
+        type: string
+    type: object
   internal_handlers.DailySummary:
     properties:
       card:
@@ -430,6 +455,15 @@ definitions:
     - date
     - total
     type: object
+  internal_handlers.DailyTotal:
+    properties:
+      count:
+        type: integer
+      date:
+        type: string
+      total:
+        type: string
+    type: object
   internal_handlers.EctoOptionsResponse:
     properties:
       collars:
@@ -440,6 +474,10 @@ definitions:
         items:
           $ref: '#/definitions/internal_handlers.SelectOption'
         type: array
+      sprays:
+        items:
+          $ref: '#/definitions/internal_handlers.SelectOption'
+        type: array
       tablets:
         items:
           $ref: '#/definitions/internal_handlers.SelectOption'
@@ -447,6 +485,7 @@ definitions:
     required:
     - collars
     - drops
+    - sprays
     - tablets
     type: object
   internal_handlers.ErrorResponse:
@@ -528,6 +567,30 @@ definitions:
     required:
     - message
     type: object
+  internal_handlers.MonthlyClinicStats:
+    properties:
+      dailyBreakdown:
+        items:
+          $ref: '#/definitions/internal_handlers.DailyTotal'
+        type: array
+      month:
+        type: string
+      procedures:
+        items:
+          $ref: '#/definitions/internal_handlers.ProcedureTypeRevenue'
+        type: array
+      total:
+        type: string
+    type: object
+  internal_handlers.MonthlyTotal:
+    properties:
+      count:
+        type: integer
+      month:
+        type: string
+      total:
+        type: string
+    type: object
   internal_handlers.MonthlyTrendItem:
     properties:
       month:
@@ -602,6 +665,10 @@ definitions:
         type: string
       castrated:
         type: boolean
+      categories:
+        items:
+          $ref: '#/definitions/internal_handlers.OwnerProcedureCategoryCount'
+        type: array
       chip:
         type: string
       code:
@@ -611,6 +678,9 @@ definitions:
       id:
         type: string
       name:
+        type: string
+      petStatus:
+        description: '"INHABITANT", "ADOPTED", "WORKMATE"'
         type: string
       sex:
         type: string
@@ -653,6 +723,9 @@ definitions:
         type: string
       name:
         type: string
+      petStatus:
+        description: '"INHABITANT", "ADOPTED", "WORKMATE"'
+        type: string
       sex:
         type: string
       species:
@@ -671,6 +744,15 @@ definitions:
     - sex
     - species
     - subscriptionStatus
+    type: object
+  internal_handlers.OwnerProcedureCategoryCount:
+    properties:
+      count:
+        type: integer
+      name:
+        type: string
+      tp:
+        type: integer
     type: object
   internal_handlers.OwnerProcedureItem:
     properties:
@@ -949,6 +1031,15 @@ definitions:
     - name
     - price
     type: object
+  internal_handlers.ProcedureCategoryCount:
+    properties:
+      count:
+        type: integer
+      name:
+        type: string
+      tp:
+        type: integer
+    type: object
   internal_handlers.ProcedureCount:
     properties:
       count:
@@ -971,6 +1062,64 @@ definitions:
     required:
     - name
     - tp
+    type: object
+  internal_handlers.ProcedureTypeRevenue:
+    properties:
+      count:
+        type: integer
+      total:
+        type: string
+      tp:
+        type: integer
+      tpname:
+        type: string
+    type: object
+  internal_handlers.PublicPetInfo:
+    properties:
+      birth:
+        type: string
+      breed:
+        type: string
+      castrated:
+        type: boolean
+      chip:
+        type: string
+      color:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      sex:
+        type: string
+      species:
+        type: string
+    type: object
+  internal_handlers.PublicPetResponse:
+    properties:
+      categories:
+        items:
+          $ref: '#/definitions/internal_handlers.ProcedureCategoryCount'
+        type: array
+      pet:
+        $ref: '#/definitions/internal_handlers.PublicPetInfo'
+    type: object
+  internal_handlers.PublicProcedureItem:
+    properties:
+      date:
+        type: string
+      diagnosis:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      nextDate:
+        type: string
+      notes:
+        type: string
+      vetName:
+        type: string
     type: object
   internal_handlers.RecordPaymentRequest:
     properties:
@@ -1185,6 +1334,21 @@ definitions:
     - brands
     - vaccines
     type: object
+  internal_handlers.YearlyClinicStats:
+    properties:
+      monthlyBreakdown:
+        items:
+          $ref: '#/definitions/internal_handlers.MonthlyTotal'
+        type: array
+      procedures:
+        items:
+          $ref: '#/definitions/internal_handlers.ProcedureTypeRevenue'
+        type: array
+      total:
+        type: string
+      year:
+        type: string
+    type: object
   vetapp-backend_internal_models.Procedure:
     properties:
       anam:
@@ -1204,6 +1368,9 @@ definitions:
         type: string
       date3:
         description: Reminder date
+        type: string
+      deh:
+        description: Dehel drug / test result (Canine Babesia)
         type: string
       diagn:
         description: Diagnosis
@@ -1230,6 +1397,9 @@ definitions:
         type: string
       price:
         description: Price in GEL
+        type: string
+      ser:
+        description: Vaccine serial/batch number
         type: string
       sk:
         description: Clinic zip
@@ -2735,6 +2905,78 @@ paths:
       summary: List vaccine options
       tags:
       - procedures
+  /public/pets/{id}:
+    get:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.PublicPetResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      summary: Get public pet profile
+      tags:
+      - public
+  /public/pets/{id}/procedures:
+    get:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Procedure type
+        in: query
+        name: tp
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.PublicProcedureItem'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      summary: Get public pet procedures
+      tags:
+      - public
+  /public/pets/code/{code}:
+    get:
+      parameters:
+      - description: 4-digit access code
+        in: path
+        name: code
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.PublicPetResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      summary: Look up pet by PIN code
+      tags:
+      - public
   /shop:
     get:
       parameters:
@@ -3025,6 +3267,102 @@ paths:
       security:
       - BearerAuth: []
       summary: Get clinic statistics
+      tags:
+      - stats
+  /stats/clinic/daily:
+    get:
+      parameters:
+      - description: Date (YYYY-MM-DD)
+        in: query
+        name: date
+        required: true
+        type: string
+      - description: Clinic code (admin only)
+        in: query
+        name: clinic
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.DailyClinicStats'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get daily clinic statistics
+      tags:
+      - stats
+  /stats/clinic/monthly:
+    get:
+      parameters:
+      - description: Month (YYYY-MM)
+        in: query
+        name: month
+        required: true
+        type: string
+      - description: Clinic code (admin only)
+        in: query
+        name: clinic
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MonthlyClinicStats'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get monthly clinic statistics
+      tags:
+      - stats
+  /stats/clinic/yearly:
+    get:
+      parameters:
+      - description: Year (YYYY)
+        in: query
+        name: year
+        required: true
+        type: string
+      - description: Clinic code (admin only)
+        in: query
+        name: clinic
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.YearlyClinicStats'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get yearly clinic statistics
       tags:
       - stats
   /subscriptions/callback:

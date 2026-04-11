@@ -42,12 +42,20 @@ type OwnerPetItem struct {
 }
 
 // OwnerPetDetail is the full detail view for a pet from the owner portal.
+// OwnerProcedureCategoryCount is a procedure type with its record count.
+type OwnerProcedureCategoryCount struct {
+	TP    int    `json:"tp"`
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
 type OwnerPetDetail struct {
 	OwnerPetItem
-	UUID      string `json:"uuid" validate:"required"`
-	Vet       string `json:"vet" validate:"required"`
-	Castrated bool   `json:"castrated" validate:"required"`
-	Code      string `json:"code" validate:"required"`
+	UUID       string                        `json:"uuid" validate:"required"`
+	Vet        string                        `json:"vet" validate:"required"`
+	Castrated  bool                          `json:"castrated" validate:"required"`
+	Code       string                        `json:"code" validate:"required"`
+	Categories []OwnerProcedureCategoryCount  `json:"categories"`
 }
 
 // OwnerCreatePetRequest is the request body for an owner adding a pet.
@@ -202,12 +210,51 @@ func (h *OwnerPortalHandler) GetPet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	petID := strconv.Itoa(int(pet.ID))
+
+	// Count procedures by type
+	type tpCount struct {
+		TP    int
+		Count int
+	}
+	var counts []tpCount
+	h.db.Model(&models.Procedure{}).
+		Select("tp as tp, COUNT(*) as count").
+		Where("uuid = ?", petID).
+		Group("tp").
+		Scan(&counts)
+
+	// Count allergies
+	var allergyCount int64
+	h.db.Model(&models.Allergy{}).Where("uuid = ?", petID).Count(&allergyCount)
+
+	categories := make([]OwnerProcedureCategoryCount, 0, len(counts)+1)
+	for _, c := range counts {
+		name := procedureTypeNames[c.TP]
+		if name == "" {
+			name = "სხვა"
+		}
+		categories = append(categories, OwnerProcedureCategoryCount{
+			TP:    c.TP,
+			Name:  name,
+			Count: c.Count,
+		})
+	}
+	if allergyCount > 0 {
+		categories = append(categories, OwnerProcedureCategoryCount{
+			TP:    999,
+			Name:  "ალერგია / დაავადება",
+			Count: int(allergyCount),
+		})
+	}
+
 	detail := OwnerPetDetail{
 		OwnerPetItem: petToOwnerItem(*pet),
 		UUID:         pet.UUID,
 		Vet:          pet.Vet,
 		Castrated:    pet.Cast != "",
 		Code:         pet.Code,
+		Categories:   categories,
 	}
 
 	writeJSON(w, http.StatusOK, detail)
