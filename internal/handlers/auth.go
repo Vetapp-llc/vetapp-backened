@@ -34,8 +34,8 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refreshToken"` // camelCase — frontend expects this
+	AccessToken  string `json:"access_token" validate:"required"`
+	RefreshToken string `json:"refreshToken" validate:"required"` // camelCase — frontend expects this
 }
 
 type RegisterRequest struct {
@@ -54,15 +54,15 @@ type RefreshRequest struct {
 
 // UserResponse is the public user profile returned by /auth/me.
 type UserResponse struct {
-	ID          uint   `json:"id"`
-	FirstName   string `json:"first_name"`
-	LastName    string `json:"last_name"`
-	Email       string `json:"email"`
-	Phone       string `json:"phone"`
-	Zip         string `json:"zip"`
-	GroupID     int    `json:"group_id"`
-	CompanyName string `json:"company_name"`
-	Status      string `json:"status"`
+	ID          uint   `json:"id" validate:"required"`
+	FirstName   string `json:"first_name" validate:"required"`
+	LastName    string `json:"last_name" validate:"required"`
+	Email       string `json:"email" validate:"required"`
+	Phone       string `json:"phone" validate:"required"`
+	Zip         string `json:"zip" validate:"required"`
+	GroupID     int    `json:"group_id" validate:"required"`
+	CompanyName string `json:"company_name" validate:"required"`
+	Status      string `json:"status" validate:"required"`
 }
 
 // --- Handlers ---
@@ -262,7 +262,7 @@ type OTPSendRequest struct {
 
 // OTPSendResponse is the response after sending an OTP.
 type OTPSendResponse struct {
-	OTPID uint `json:"otp_id"`
+	OTPID uint `json:"otp_id" validate:"required"`
 }
 
 // OTPVerifyRequest is the request body for verifying an OTP.
@@ -273,7 +273,7 @@ type OTPVerifyRequest struct {
 
 // OTPVerifyResponse is the response after verifying an OTP.
 type OTPVerifyResponse struct {
-	Verified bool `json:"verified"`
+	Verified bool `json:"verified" validate:"required"`
 }
 
 // PasswordResetRequest is the request body for resetting a password.

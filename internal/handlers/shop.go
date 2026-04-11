@@ -32,11 +32,11 @@ type CreateShopRequest struct {
 
 // ShopResponse is the API response for a sale.
 type ShopResponse struct {
-	ID      uint   `json:"id"`
-	Name    string `json:"name"`
-	Price   string `json:"price"`
-	Date    string `json:"date"`
-	VetName string `json:"vetname"`
+	ID      uint   `json:"id" validate:"required"`
+	Name    string `json:"name" validate:"required"`
+	Price   string `json:"price" validate:"required"`
+	Date    string `json:"date" validate:"required"`
+	VetName string `json:"vetname" validate:"required"`
 }
 
 func shopToResponse(s models.Shop) ShopResponse {

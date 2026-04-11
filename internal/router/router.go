@@ -118,6 +118,9 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireRole(models.RoleVet, models.RoleAdmin))
 				r.Get("/clinic", statsHandler.Clinic)
+				r.Get("/clinic/daily", statsHandler.DailyClinic)
+			r.Get("/clinic/monthly", statsHandler.MonthlyClinic)
+			r.Get("/clinic/yearly", statsHandler.YearlyClinic)
 			})
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireRole(models.RoleAdmin))

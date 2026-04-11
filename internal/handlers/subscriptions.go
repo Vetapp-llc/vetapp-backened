@@ -27,10 +27,10 @@ func NewSubscriptionHandler(db *gorm.DB, ipayService *services.IPayService) *Sub
 
 // PackageResponse is the API response for a subscription package.
 type PackageResponse struct {
-	ID       uint   `json:"id"`
-	Name     string `json:"name"`
-	Price    string `json:"price"`
-	Duration int    `json:"duration"`
+	ID       uint   `json:"id" validate:"required"`
+	Name     string `json:"name" validate:"required"`
+	Price    string `json:"price" validate:"required"`
+	Duration int    `json:"duration" validate:"required"`
 }
 
 // CheckoutRequest is the request body for creating a checkout session.
@@ -41,8 +41,8 @@ type CheckoutRequest struct {
 
 // CheckoutResponse is the response with the iPay redirect URL.
 type CheckoutResponse struct {
-	RedirectURL string `json:"redirect_url"`
-	OrderID     string `json:"order_id"`
+	RedirectURL string `json:"redirect_url" validate:"required"`
+	OrderID     string `json:"order_id" validate:"required"`
 }
 
 // --- Handlers ---

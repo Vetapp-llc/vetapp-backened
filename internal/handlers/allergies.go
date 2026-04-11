@@ -31,10 +31,10 @@ type CreateAllergyRequest struct {
 
 // AllergyResponse is the API response for an allergy record.
 type AllergyResponse struct {
-	ID   uint   `json:"id"`
-	UUID string `json:"uuid"`
-	Name string `json:"name"`
-	Date string `json:"date"`
+	ID   uint   `json:"id" validate:"required"`
+	UUID string `json:"uuid" validate:"required"`
+	Name string `json:"name" validate:"required"`
+	Date string `json:"date" validate:"required"`
 }
 
 // --- Handlers ---

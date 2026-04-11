@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"vetapp-backend/internal/data"
 	"vetapp-backend/internal/middleware"
 	"vetapp-backend/internal/models"
 
@@ -26,55 +27,55 @@ func NewPetHandler(db *gorm.DB) *PetHandler {
 // --- Response types matching frontend expectations ---
 
 type PetListItem struct {
-	ID         string  `json:"id"`
-	Name       string  `json:"name"`
-	Species    string  `json:"species"`
-	Breed      string  `json:"breed"`
-	Sex        string  `json:"sex"`
-	Chip       string  `json:"chip"`
-	OwnerName  string  `json:"ownerName"`
-	OwnerPhone string  `json:"ownerPhone"`
+	ID         string  `json:"id" validate:"required"`
+	Name       string  `json:"name" validate:"required"`
+	Species    string  `json:"species" validate:"required"`
+	Breed      string  `json:"breed" validate:"required"`
+	Sex        string  `json:"sex" validate:"required"`
+	Chip       string  `json:"chip" validate:"required"`
+	OwnerName  string  `json:"ownerName" validate:"required"`
+	OwnerPhone string  `json:"ownerPhone" validate:"required"`
 	Birth      *string `json:"birth"`
-	Color      string  `json:"color"`
+	Color      string  `json:"color" validate:"required"`
 }
 
 type PetDetail struct {
 	PetListItem
-	UUID            string          `json:"uuid"`
-	Vet             string          `json:"vet"`
+	UUID            string          `json:"uuid" validate:"required"`
+	Vet             string          `json:"vet" validate:"required"`
 	Date            *string         `json:"date"`
-	Variety         string          `json:"variety"`
-	Code            string          `json:"code"`
-	Status          string          `json:"status"`
+	Variety         string          `json:"variety" validate:"required"`
+	Code            string          `json:"code" validate:"required"`
+	Status          string          `json:"status" validate:"required"`
 	Birth2          *string         `json:"birth2"`
-	Castrated       bool            `json:"castrated"`
+	Castrated       bool            `json:"castrated" validate:"required"`
 	CastDate        *string         `json:"castDate"`
-	OwnerEmail      string          `json:"ownerEmail"`
-	OwnerPersonalId string          `json:"ownerPersonalId"`
-	MedicalRecords  []MedicalRecord `json:"medicalRecords"`
+	OwnerEmail      string          `json:"ownerEmail" validate:"required"`
+	OwnerPersonalId string          `json:"ownerPersonalId" validate:"required"`
+	MedicalRecords  []MedicalRecord `json:"medicalRecords" validate:"required"`
 }
 
 type MedicalRecord struct {
-	ID            string   `json:"id"`
+	ID            string   `json:"id" validate:"required"`
 	Date          *string  `json:"date"`
-	ProcedureType string   `json:"procedureType"`
-	ProcedureName string   `json:"procedureName"`
-	Diagnosis     string   `json:"diagnosis"`
-	Notes         string   `json:"notes"`
-	Comment       string   `json:"comment"`
-	VetName       string   `json:"vetName"`
-	Price         string   `json:"price"`
-	Anamnesis     string   `json:"anamnesis"`
-	Vaccinations  []string `json:"vaccinations"`
-	Tests         []string `json:"tests"`
+	ProcedureType string   `json:"procedureType" validate:"required"`
+	ProcedureName string   `json:"procedureName" validate:"required"`
+	Diagnosis     string   `json:"diagnosis" validate:"required"`
+	Notes         string   `json:"notes" validate:"required"`
+	Comment       string   `json:"comment" validate:"required"`
+	VetName       string   `json:"vetName" validate:"required"`
+	Price         string   `json:"price" validate:"required"`
+	Anamnesis     string   `json:"anamnesis" validate:"required"`
+	Vaccinations  []string `json:"vaccinations" validate:"required"`
+	Tests         []string `json:"tests" validate:"required"`
 }
 
 type PaginatedResponse struct {
-	Data       interface{} `json:"data"`
-	Total      int64       `json:"total"`
-	Page       int         `json:"page"`
-	PageSize   int         `json:"pageSize"`
-	TotalPages int         `json:"totalPages"`
+	Data       interface{} `json:"data" validate:"required"`
+	Total      int64       `json:"total" validate:"required"`
+	Page       int         `json:"page" validate:"required"`
+	PageSize   int         `json:"pageSize" validate:"required"`
+	TotalPages int         `json:"totalPages" validate:"required"`
 }
 
 // CreatePetRequest is the request body for creating a pet.
@@ -91,15 +92,17 @@ type CreatePetRequest struct {
 	Email     string `json:"email"`
 	FirstName string `json:"first_name"`
 	Color     string `json:"color"`
+	Address   string `json:"address"`
+	Status    *int   `json:"status"`
 }
 
 // CertificateResponse is the response for border crossing certificate.
 type CertificateResponse struct {
-	Pet             PetListItem   `json:"pet"`
-	Vaccination     MedicalRecord `json:"vaccination"`
-	Rabies          MedicalRecord `json:"rabies"`
-	Dehelminization MedicalRecord `json:"dehelminization"`
-	Ectoparasite    MedicalRecord `json:"ectoparasite"`
+	Pet             PetListItem   `json:"pet" validate:"required"`
+	Vaccination     MedicalRecord `json:"vaccination" validate:"required"`
+	Rabies          MedicalRecord `json:"rabies" validate:"required"`
+	Dehelminization MedicalRecord `json:"dehelminization" validate:"required"`
+	Ectoparasite    MedicalRecord `json:"ectoparasite" validate:"required"`
 }
 
 // petToListItem converts a DB pet model to the frontend list response.
@@ -225,7 +228,7 @@ func (h *PetHandler) Get(w http.ResponseWriter, r *http.Request) {
 		Code:            pet.Code,
 		Status:          strconv.Itoa(pet.Status),
 		OwnerEmail:      pet.Email,
-		OwnerPersonalId: pet.Code,
+		OwnerPersonalId: pet.UUID,
 		Castrated:       pet.Cast != "",
 		MedicalRecords:  records,
 	}
@@ -256,6 +259,17 @@ func (h *PetHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate breed against known breeds for dog/cat
+	if !data.IsValidBreed(req.Pet, req.Variety) {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid breed for this species"})
+		return
+	}
+
+	petStatus := 1
+	if req.Status != nil {
+		petStatus = *req.Status
+	}
+
 	pet := models.Pet{
 		UUID:      req.UUID,
 		Name:      req.Name,
@@ -270,12 +284,17 @@ func (h *PetHandler) Create(w http.ResponseWriter, r *http.Request) {
 		FirstName: req.FirstName,
 		Color:     req.Color,
 		Vet:       claims.Zip,
-		Status:    1,
+		Status:    petStatus,
 	}
 
 	if err := h.db.Create(&pet).Error; err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to create pet"})
 		return
+	}
+
+	// Update owner address if provided
+	if req.Address != "" {
+		h.db.Model(&models.User{}).Where("last_name = ?", req.UUID).Update("address", req.Address)
 	}
 
 	writeJSON(w, http.StatusCreated, petToListItem(pet))

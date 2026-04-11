@@ -28,25 +28,25 @@ func NewOwnerPortalHandler(db *gorm.DB) *OwnerPortalHandler {
 
 // OwnerPetItem is the owner's view of a pet, including subscription status.
 type OwnerPetItem struct {
-	ID                 string  `json:"id"`
-	Name               string  `json:"name"`
-	Species            string  `json:"species"`
-	Breed              string  `json:"breed"`
-	Sex                string  `json:"sex"`
-	Chip               string  `json:"chip"`
+	ID                 string  `json:"id" validate:"required"`
+	Name               string  `json:"name" validate:"required"`
+	Species            string  `json:"species" validate:"required"`
+	Breed              string  `json:"breed" validate:"required"`
+	Sex                string  `json:"sex" validate:"required"`
+	Chip               string  `json:"chip" validate:"required"`
 	Birth              *string `json:"birth"`
-	Color              string  `json:"color"`
-	SubscriptionStatus string  `json:"subscriptionStatus"` // "active", "expired", "unregistered"
+	Color              string  `json:"color" validate:"required"`
+	SubscriptionStatus string  `json:"subscriptionStatus" validate:"required"` // "active", "expired", "unregistered"
 	SubscriptionExpiry *string `json:"subscriptionExpiry"`
 }
 
 // OwnerPetDetail is the full detail view for a pet from the owner portal.
 type OwnerPetDetail struct {
 	OwnerPetItem
-	UUID     string `json:"uuid"`
-	Vet      string `json:"vet"`
-	Castrated bool  `json:"castrated"`
-	Code     string `json:"code"`
+	UUID      string `json:"uuid" validate:"required"`
+	Vet       string `json:"vet" validate:"required"`
+	Castrated bool   `json:"castrated" validate:"required"`
+	Code      string `json:"code" validate:"required"`
 }
 
 // OwnerCreatePetRequest is the request body for an owner adding a pet.
@@ -62,40 +62,40 @@ type OwnerCreatePetRequest struct {
 
 // OwnerProcedureItem is a medical record as seen by the owner.
 type OwnerProcedureItem struct {
-	ID            string   `json:"id"`
+	ID            string   `json:"id" validate:"required"`
 	Date          *string  `json:"date"`
 	NextDate      *string  `json:"nextDate"`
-	ProcedureType string   `json:"procedureType"`
-	ProcedureName string   `json:"procedureName"`
-	Diagnosis     string   `json:"diagnosis"`
-	Notes         string   `json:"notes"`
-	Comment       string   `json:"comment"`
-	VetName       string   `json:"vetName"`
-	Vaccinations  []string `json:"vaccinations"`
+	ProcedureType string   `json:"procedureType" validate:"required"`
+	ProcedureName string   `json:"procedureName" validate:"required"`
+	Diagnosis     string   `json:"diagnosis" validate:"required"`
+	Notes         string   `json:"notes" validate:"required"`
+	Comment       string   `json:"comment" validate:"required"`
+	VetName       string   `json:"vetName" validate:"required"`
+	Vaccinations  []string `json:"vaccinations" validate:"required"`
 }
 
 // AccessCodeResponse is the response when generating a new access code.
 type AccessCodeResponse struct {
-	Code string `json:"code"`
+	Code string `json:"code" validate:"required"`
 }
 
 // CalendarItem is an upcoming procedure grouped by date.
 type CalendarItem struct {
-	Date    string `json:"date"`
-	PetID   string `json:"petId"`
-	PetName string `json:"petName"`
-	Type    string `json:"type"`
-	Name    string `json:"name"`
+	Date    string `json:"date" validate:"required"`
+	PetID   string `json:"petId" validate:"required"`
+	PetName string `json:"petName" validate:"required"`
+	Type    string `json:"type" validate:"required"`
+	Name    string `json:"name" validate:"required"`
 }
 
 // OwnerVisit is an appointment as seen by the owner.
 type OwnerVisit struct {
-	ID        uint   `json:"id"`
-	Date      string `json:"date"`
-	Time      string `json:"time"`
-	Operation string `json:"operation"`
-	VetName   string `json:"vetName"`
-	Status    string `json:"status"`
+	ID        uint   `json:"id" validate:"required"`
+	Date      string `json:"date" validate:"required"`
+	Time      string `json:"time" validate:"required"`
+	Operation string `json:"operation" validate:"required"`
+	VetName   string `json:"vetName" validate:"required"`
+	Status    string `json:"status" validate:"required"`
 }
 
 // --- Helpers ---

@@ -4,6 +4,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"vetapp-backend/internal/middleware"
 	"vetapp-backend/internal/models"
@@ -25,16 +26,16 @@ func NewOwnerHandler(db *gorm.DB) *OwnerHandler {
 // --- Response types ---
 
 type OwnerItem struct {
-	PersonalID string `json:"personalId"`
-	Name       string `json:"name"`
-	Phone      string `json:"phone"`
-	Email      string `json:"email"`
-	PetCount   int    `json:"petCount"`
+	PersonalID string `json:"personalId" validate:"required"`
+	Name       string `json:"name" validate:"required"`
+	Phone      string `json:"phone" validate:"required"`
+	Email      string `json:"email" validate:"required"`
+	PetCount   int    `json:"petCount" validate:"required"`
 }
 
 type OwnerWithPets struct {
 	OwnerItem
-	Pets []PetListItem `json:"pets"`
+	Pets []PetListItem `json:"pets" validate:"required"`
 }
 
 // List returns owners grouped from the pets table.
@@ -66,15 +67,22 @@ func (h *OwnerHandler) List(w http.ResponseWriter, r *http.Request) {
 	searchCond := ""
 	args := []interface{}{claims.Zip}
 	if search != "" {
-		searchCond = "AND (first_name ILIKE ? OR phone ILIKE ? OR email ILIKE ? OR code ILIKE ?)"
+		// Strip leading zeros from search term for uuid numeric comparison
+		// (uuid column is bigint — leading zeros are dropped on storage)
+		trimmed := strings.TrimLeft(search, "0")
+		if trimmed == "" {
+			trimmed = "0"
+		}
 		like := "%" + search + "%"
-		args = append(args, like, like, like, like)
+		trimmedLike := "%" + trimmed + "%"
+		searchCond = "AND (first_name ILIKE ? OR phone ILIKE ? OR email ILIKE ? OR uuid::text ILIKE ? OR uuid::text ILIKE ? OR code ILIKE ?)"
+		args = append(args, like, like, like, like, trimmedLike, like)
 	}
 
-	// Count distinct owners
+	// Count distinct owners (group by uuid — the owner's actual personal ID)
 	var total int64
 	h.db.Raw(
-		`SELECT COUNT(DISTINCT COALESCE(NULLIF(code,''), uuid::text)) FROM pets WHERE vet = ? `+searchCond,
+		`SELECT COUNT(DISTINCT uuid) FROM pets WHERE vet = ? `+searchCond,
 		args...,
 	).Scan(&total)
 
@@ -89,14 +97,14 @@ func (h *OwnerHandler) List(w http.ResponseWriter, r *http.Request) {
 	var rows []ownerRow
 	h.db.Raw(
 		`SELECT
-			COALESCE(NULLIF(code,''), uuid::text) AS personal_id,
+			uuid::text AS personal_id,
 			MAX(first_name) AS name,
 			MAX(phone) AS phone,
 			MAX(email) AS email,
 			COUNT(*)::int AS pet_count
 		FROM pets
 		WHERE vet = ? `+searchCond+`
-		GROUP BY COALESCE(NULLIF(code,''), uuid::text)
+		GROUP BY uuid
 		ORDER BY MAX(first_name) ASC
 		LIMIT ? OFFSET ?`,
 		append(args, pageSize, offset)...,
@@ -135,31 +143,48 @@ func (h *OwnerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	personalID := chi.URLParam(r, "personalId")
 	claims := middleware.GetClaims(r)
 
+	// Strip leading zeros for uuid numeric comparison (bigint strips them on storage)
+	trimmedID := strings.TrimLeft(personalID, "0")
+	if trimmedID == "" {
+		trimmedID = "0"
+	}
+
+	// Look up by uuid (the owner's actual personal ID) — scoped to current clinic
 	var pets []models.Pet
-	if err := h.db.Where("vet = ? AND (code = ? OR uuid::text = ?)", claims.Zip, personalID, personalID).
-		Order("id DESC").Find(&pets).Error; err != nil || len(pets) == 0 {
+	if err := h.db.Where(
+		"vet = ? AND (uuid::text = ? OR uuid::text = ?)",
+		claims.Zip, personalID, trimmedID,
+	).Order("id DESC").Find(&pets).Error; err != nil || len(pets) == 0 {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "owner not found"})
 		return
 	}
 
-	first := pets[0]
 	petItems := make([]PetListItem, len(pets))
 	for i, p := range pets {
 		petItems[i] = petToListItem(p)
 	}
 
+	// Derive owner info using MAX (consistent with List handler's aggregation)
+	bestName, bestPhone, bestEmail := "", "", ""
+	for _, p := range pets {
+		if p.FirstName > bestName {
+			bestName = p.FirstName
+		}
+		if p.Phone > bestPhone {
+			bestPhone = p.Phone
+		}
+		if p.Email > bestEmail {
+			bestEmail = p.Email
+		}
+	}
+
 	owner := OwnerWithPets{
 		OwnerItem: OwnerItem{
-			PersonalID: func() string {
-				if first.Code != "" {
-					return first.Code
-				}
-				return personalID
-			}(),
-			Name:     first.FirstName,
-			Phone:    first.Phone,
-			Email:    first.Email,
-			PetCount: len(pets),
+			PersonalID: personalID,
+			Name:       bestName,
+			Phone:      bestPhone,
+			Email:      bestEmail,
+			PetCount:   len(pets),
 		},
 		Pets: petItems,
 	}

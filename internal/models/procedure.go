@@ -25,6 +25,8 @@ type Procedure struct {
 	Koment  string `json:"koment"`                             // Vet notes (internal)
 	Coment  string `json:"coment"`                             // Comment (visible to owner)
 	Dani    string `json:"dani"`                               // Prescription
+	Ser     string `json:"ser"`                                // Vaccine serial/batch number
+	Deh     string `json:"deh"`                                // Dehel drug / test result (Canine Babesia)
 
 	// Test result fields
 	Vac1 string `json:"vac1"`

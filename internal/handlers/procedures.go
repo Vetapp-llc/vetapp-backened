@@ -45,6 +45,8 @@ type CreateProcedureRequest struct {
 	Koment string `json:"koment"`
 	Coment string `json:"coment"`
 	Dani   string `json:"dani"`
+	Ser    string `json:"ser"`
+	Deh    string `json:"deh"`
 	Vac1   string `json:"vac1"`
 	Vac2   string `json:"vac2"`
 	Vac3   string `json:"vac3"`
@@ -58,27 +60,28 @@ type CreateProcedureRequest struct {
 
 // ProcedureTypeItem represents a procedure type option.
 type ProcedureTypeItem struct {
-	TP   int    `json:"tp"`
-	Name string `json:"name"`
+	TP   int    `json:"tp" validate:"required"`
+	Name string `json:"name" validate:"required"`
 }
 
 // SelectOption represents a value/label option.
 type SelectOption struct {
-	Value string `json:"value"`
-	Label string `json:"label"`
+	Value string `json:"value" validate:"required"`
+	Label string `json:"label" validate:"required"`
 }
 
 // VaccineOptionsResponse is the response for vaccine options.
 type VaccineOptionsResponse struct {
-	Vaccines []SelectOption `json:"vaccines"`
-	Brands   []SelectOption `json:"brands"`
+	Vaccines []SelectOption `json:"vaccines" validate:"required"`
+	Brands   []SelectOption `json:"brands" validate:"required"`
 }
 
 // EctoOptionsResponse is the response for ectoparasite options.
 type EctoOptionsResponse struct {
-	Drops   []SelectOption `json:"drops"`
-	Collars []SelectOption `json:"collars"`
-	Tablets []SelectOption `json:"tablets"`
+	Drops   []SelectOption `json:"drops" validate:"required"`
+	Collars []SelectOption `json:"collars" validate:"required"`
+	Tablets []SelectOption `json:"tablets" validate:"required"`
+	Sprays  []SelectOption `json:"sprays" validate:"required"`
 }
 
 // List returns procedures (daily register).
@@ -199,6 +202,8 @@ func (h *ProcedureHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Koment:  req.Koment,
 		Coment:  req.Coment,
 		Dani:    req.Dani,
+		Ser:     req.Ser,
+		Deh:     req.Deh,
 		Vac1:    req.Vac1,
 		Vac2:    req.Vac2,
 		Vac3:    req.Vac3,
@@ -332,17 +337,30 @@ func (h *ProcedureHandler) Types(w http.ResponseWriter, r *http.Request) {
 func (h *ProcedureHandler) VaccineOptions(w http.ResponseWriter, r *http.Request) {
 	options := VaccineOptionsResponse{
 		Vaccines: []SelectOption{
-			{Value: "კომპლექსური", Label: "კომპლექსური (Complex)"},
-			{Value: "ცოფი", Label: "ცოფი (Rabies)"},
-			{Value: "კატის კომპლექსური", Label: "კატის კომპლექსური (Cat Complex)"},
+			{Value: "კომპლექსური ვაქცინა", Label: "კომპლექსური ვაქცინა"},
+			{Value: "ცოფის საწინააღმდეგო ვაქცინა", Label: "ცოფის საწინააღმდეგო ვაქცინა"},
+			{Value: "ვოლიერული ხველის საწინააღმდეგო ვაქცინა", Label: "ვოლიერული ხველის საწინააღმდეგო ვაქცინა"},
+			{Value: "ანტიმიკოზური ვაქცინა", Label: "ანტიმიკოზური ვაქცინა"},
 		},
 		Brands: []SelectOption{
-			{Value: "Nobivac", Label: "Nobivac"},
-			{Value: "Eurican", Label: "Eurican"},
-			{Value: "Vanguard", Label: "Vanguard"},
-			{Value: "Biocan", Label: "Biocan"},
-			{Value: "Purevax", Label: "Purevax"},
+			{Value: "Eurican DHPPi2-L", Label: "Eurican DHPPi2-L"},
+			{Value: "Nobivac DHPPi+L", Label: "Nobivac DHPPi+L"},
+			{Value: "Nobivac Puppy DP", Label: "Nobivac Puppy DP"},
+			{Value: "Vanguard plus 5/CV-L", Label: "Vanguard plus 5/CV-L"},
+			{Value: "Biocan DHPPi+L", Label: "Biocan DHPPi+L"},
+			{Value: "Biocan Novel DHPPi/L4", Label: "Biocan Novel DHPPi/L4"},
+			{Value: "Biocan Novel DHPPi/L4R", Label: "Biocan Novel DHPPi/L4R"},
+			{Value: "Biocan Novel Puppy", Label: "Biocan Novel Puppy"},
+			{Value: "Biocan Puppy", Label: "Biocan Puppy"},
+			{Value: "Nobivac Rabies", Label: "Nobivac Rabies"},
+			{Value: "Biocan R", Label: "Biocan R"},
 			{Value: "Rabisin", Label: "Rabisin"},
+			{Value: "Defensor 3", Label: "Defensor 3"},
+			{Value: "Nobivac KC", Label: "Nobivac KC"},
+			{Value: "Biocan M plus", Label: "Biocan M plus"},
+			{Value: "Vacderm", Label: "Vacderm"},
+			{Value: "NobivacR Tricat Trio", Label: "NobivacR Tricat Trio"},
+			{Value: "Biofel PCH", Label: "Biofel PCH"},
 		},
 	}
 	writeJSON(w, http.StatusOK, options)
@@ -357,11 +375,7 @@ func (h *ProcedureHandler) VaccineOptions(w http.ResponseWriter, r *http.Request
 // @Router /procedures/test-options [get]
 func (h *ProcedureHandler) TestOptions(w http.ResponseWriter, r *http.Request) {
 	options := []SelectOption{
-		{Value: "blood", Label: "სისხლის ანალიზი (Blood Test)"},
-		{Value: "urine", Label: "შარდის ანალიზი (Urine Test)"},
-		{Value: "fecal", Label: "განავლის ანალიზი (Fecal Test)"},
-		{Value: "skin", Label: "კანის ანალიზი (Skin Scraping)"},
-		{Value: "rapid", Label: "სწრაფი ტესტი (Rapid Test)"},
+		{Value: "ტესტი", Label: "ტესტი"},
 	}
 	writeJSON(w, http.StatusOK, options)
 }
@@ -375,8 +389,11 @@ func (h *ProcedureHandler) TestOptions(w http.ResponseWriter, r *http.Request) {
 // @Router /procedures/dehel-options [get]
 func (h *ProcedureHandler) DehelOptions(w http.ResponseWriter, r *http.Request) {
 	options := []SelectOption{
-		{Value: "Milbemax", Label: "Milbemax"},
 		{Value: "Drontal", Label: "Drontal"},
+		{Value: "Caniverm", Label: "Caniverm"},
+		{Value: "Brovanol", Label: "Brovanol"},
+		{Value: "Cestal Plus", Label: "Cestal Plus"},
+		{Value: "Milbemax", Label: "Milbemax"},
 		{Value: "Caniquantel", Label: "Caniquantel"},
 		{Value: "Prazitel", Label: "Prazitel"},
 		{Value: "Profender", Label: "Profender"},
@@ -394,19 +411,37 @@ func (h *ProcedureHandler) DehelOptions(w http.ResponseWriter, r *http.Request) 
 func (h *ProcedureHandler) EctoOptions(w http.ResponseWriter, r *http.Request) {
 	options := EctoOptionsResponse{
 		Drops: []SelectOption{
-			{Value: "Frontline", Label: "Frontline"},
+			{Value: "Frontline(TRI-ACT)", Label: "Frontline(TRI-ACT)"},
+			{Value: "Frontline(Combo)", Label: "Frontline(Combo)"},
 			{Value: "Advantix", Label: "Advantix"},
-			{Value: "Stronghold", Label: "Stronghold"},
+			{Value: "Advocate", Label: "Advocate"},
+			{Value: "Advantage", Label: "Advantage"},
+			{Value: "Bars", Label: "Bars"},
+			{Value: "Chistotel", Label: "Chistotel"},
+			{Value: "K9 Advantix II", Label: "K9 Advantix II"},
+			{Value: "Dana stop-on", Label: "Dana stop-on"},
+			{Value: "Lega", Label: "Lega"},
 		},
 		Collars: []SelectOption{
-			{Value: "Seresto", Label: "Seresto"},
 			{Value: "Scalibor", Label: "Scalibor"},
 			{Value: "Foresto", Label: "Foresto"},
+			{Value: "Kiltix", Label: "Kiltix"},
+			{Value: "Bars", Label: "Bars"},
+			{Value: "Beaphar", Label: "Beaphar"},
+			{Value: "Bio", Label: "Bio"},
+			{Value: "Protecto", Label: "Protecto"},
+			{Value: "Dana", Label: "Dana"},
 		},
 		Tablets: []SelectOption{
+			{Value: "NexGuard(SPECTRA)", Label: "NexGuard(SPECTRA)"},
 			{Value: "Bravecto", Label: "Bravecto"},
-			{Value: "Nexgard", Label: "Nexgard"},
 			{Value: "Simparica", Label: "Simparica"},
+		},
+		Sprays: []SelectOption{
+			{Value: "Frontline(SPRAY)", Label: "Frontline(SPRAY)"},
+			{Value: "Bloxnet", Label: "Bloxnet"},
+			{Value: "Chistotel", Label: "Chistotel"},
+			{Value: "Insektol", Label: "Insektol"},
 		},
 	}
 	writeJSON(w, http.StatusOK, options)

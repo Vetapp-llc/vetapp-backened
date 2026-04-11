@@ -31,9 +31,9 @@ type CreatePriceRequest struct {
 
 // PriceResponse is the API response for a price entry.
 type PriceResponse struct {
-	ID    uint   `json:"id"`
-	Name  string `json:"name"`
-	Price string `json:"price"`
+	ID    uint   `json:"id" validate:"required"`
+	Name  string `json:"name" validate:"required"`
+	Price string `json:"price" validate:"required"`
 }
 
 func priceToResponse(p models.Price) PriceResponse {
@@ -60,7 +60,7 @@ func (h *PriceHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var prices []models.Price
-	if err := h.db.Where("sk = ?", clinic).Order("name ASC").Find(&prices).Error; err != nil {
+	if err := h.db.Where("zip = ?", clinic).Order("name ASC").Find(&prices).Error; err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to fetch prices"})
 		return
 	}

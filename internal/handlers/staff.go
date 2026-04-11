@@ -36,12 +36,12 @@ type CreateStaffRequest struct {
 
 // StaffResponse is the API response for a staff member.
 type StaffResponse struct {
-	ID        uint   `json:"id"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
-	Email     string `json:"email"`
-	Phone     string `json:"phone"`
-	Status    string `json:"status"`
+	ID        uint   `json:"id" validate:"required"`
+	FirstName string `json:"first_name" validate:"required"`
+	LastName  string `json:"last_name" validate:"required"`
+	Email     string `json:"email" validate:"required"`
+	Phone     string `json:"phone" validate:"required"`
+	Status    string `json:"status" validate:"required"`
 }
 
 func staffToResponse(u models.User) StaffResponse {

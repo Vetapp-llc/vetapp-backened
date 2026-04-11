@@ -24,10 +24,10 @@ func NewNotificationHandler(db *gorm.DB, smsService *services.SMSService) *Notif
 
 // ReminderResult is the result of sending reminders.
 type ReminderResult struct {
-	Expired    int `json:"expired_sent"`
-	Birthdays  int `json:"birthdays_sent"`
-	Procedures int `json:"procedures_sent"`
-	Errors     int `json:"errors"`
+	Expired    int `json:"expired_sent" validate:"required"`
+	Birthdays  int `json:"birthdays_sent" validate:"required"`
+	Procedures int `json:"procedures_sent" validate:"required"`
+	Errors     int `json:"errors" validate:"required"`
 }
 
 // --- Handlers ---

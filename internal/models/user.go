@@ -14,6 +14,7 @@ type User struct {
 	GroupID     int        `gorm:"column:group_id" json:"group_id"`          // 1=owner, 2=vet, 4=admin
 	Password    []byte     `gorm:"type:bytea" json:"-"`                      // AES encrypted, never exposed in JSON
 	CompanyName string     `gorm:"column:company_name" json:"company_name"`
+	Address     string     `json:"address"`
 	LastLogin   *time.Time `gorm:"column:last_login" json:"last_login"`
 	Status      string     `gorm:"default:T" json:"status"`
 }

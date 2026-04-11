@@ -14,7 +14,10 @@ import (
 // Connect establishes a connection to PostgreSQL via GORM.
 // It pings the database to verify connectivity.
 func Connect(cfg *config.Config) (*gorm.DB, error) {
-	db, err := gorm.Open(postgres.Open(cfg.DSN()), &gorm.Config{
+	db, err := gorm.Open(postgres.New(postgres.Config{
+		DSN:                  cfg.DSN(),
+		PreferSimpleProtocol: true, // disables prepared statement cache (required for PgBouncer/Supabase)
+	}), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {

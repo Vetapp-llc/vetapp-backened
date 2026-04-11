@@ -45,24 +45,24 @@ type AssignSlotRequest struct {
 
 // AppointmentResponse is the API response for an appointment.
 type AppointmentResponse struct {
-	ID      uint   `json:"id"`
-	UUID    string `json:"uuid"`
-	Date    string `json:"date"`
-	Time    string `json:"time"`
-	VetName string `json:"vetname"`
-	PName   string `json:"pname"`
-	Owner   string `json:"owner"`
-	OwnerN  string `json:"ownern"`
-	Phone   string `json:"phone"`
-	TPName  string `json:"tpname"`
-	Koment  string `json:"koment"`
-	Status  string `json:"status"`
+	ID      uint   `json:"id" validate:"required"`
+	UUID    string `json:"uuid" validate:"required"`
+	Date    string `json:"date" validate:"required"`
+	Time    string `json:"time" validate:"required"`
+	VetName string `json:"vetname" validate:"required"`
+	PName   string `json:"pname" validate:"required"`
+	Owner   string `json:"owner" validate:"required"`
+	OwnerN  string `json:"ownern" validate:"required"`
+	Phone   string `json:"phone" validate:"required"`
+	TPName  string `json:"tpname" validate:"required"`
+	Koment  string `json:"koment" validate:"required"`
+	Status  string `json:"status" validate:"required"`
 }
 
 // TimeSlot represents an available time slot.
 type TimeSlot struct {
-	Time      string `json:"time"`
-	Available bool   `json:"available"`
+	Time      string `json:"time" validate:"required"`
+	Available bool   `json:"available" validate:"required"`
 }
 
 func appointmentToResponse(a models.Appointment) AppointmentResponse {

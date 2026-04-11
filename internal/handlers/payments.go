@@ -33,21 +33,21 @@ type RecordPaymentRequest struct {
 
 // PaymentResponse is the API response for a payment.
 type PaymentResponse struct {
-	ID     uint   `json:"id"`
-	UUID   string `json:"uuid"`
-	Date   string `json:"date"`
-	Method string `json:"method"`
-	Amount string `json:"amount"`
-	VetID  string `json:"vet_id"`
-	Owner  string `json:"owner"`
+	ID     uint   `json:"id" validate:"required"`
+	UUID   string `json:"uuid" validate:"required"`
+	Date   string `json:"date" validate:"required"`
+	Method string `json:"method" validate:"required"`
+	Amount string `json:"amount" validate:"required"`
+	VetID  string `json:"vet_id" validate:"required"`
+	Owner  string `json:"owner" validate:"required"`
 }
 
 // DailySummary is the daily payment summary.
 type DailySummary struct {
-	Date  string `json:"date"`
-	Card  string `json:"card"`
-	Cash  string `json:"cash"`
-	Total string `json:"total"`
+	Date  string `json:"date" validate:"required"`
+	Card  string `json:"card" validate:"required"`
+	Cash  string `json:"cash" validate:"required"`
+	Total string `json:"total" validate:"required"`
 }
 
 func paymentToResponse(p models.Payment) PaymentResponse {
