@@ -19,6 +19,7 @@ type Pet struct {
 	Color     string `json:"color"`
 	Cast      string `json:"cast"`                              // Neutering type
 	Birth2    string `gorm:"column:birth2" json:"birth2"`       // Subscription expiry
+	PetStatus string `gorm:"column:petStatus" json:"petStatus"` // INHABITANT, ADOPTED, WORKMATE
 }
 
 func (Pet) TableName() string { return "pets" }

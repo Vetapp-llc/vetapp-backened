@@ -36,6 +36,7 @@ type OwnerPetItem struct {
 	Chip               string  `json:"chip" validate:"required"`
 	Birth              *string `json:"birth"`
 	Color              string  `json:"color" validate:"required"`
+	PetStatus          string  `json:"petStatus"`                              // "INHABITANT", "ADOPTED", "WORKMATE"
 	SubscriptionStatus string  `json:"subscriptionStatus" validate:"required"` // "active", "expired", "unregistered"
 	SubscriptionExpiry *string `json:"subscriptionExpiry"`
 }
@@ -126,6 +127,7 @@ func petToOwnerItem(p models.Pet) OwnerPetItem {
 		Sex:                p.Sex,
 		Chip:               p.Chip,
 		Color:              p.Color,
+		PetStatus:          p.PetStatus,
 		SubscriptionStatus: subscriptionStatus(p),
 	}
 	if p.Date != "" {
