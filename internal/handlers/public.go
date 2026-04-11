@@ -113,6 +113,81 @@ func (h *PublicHandler) LookupByCode(w http.ResponseWriter, r *http.Request) {
 	h.writePetProfile(w, pet)
 }
 
+// PublicProcedureItem is a single procedure in the public view.
+type PublicProcedureItem struct {
+	ID       string  `json:"id"`
+	Date     string  `json:"date"`
+	NextDate string  `json:"nextDate,omitempty"`
+	Name     string  `json:"name,omitempty"`
+	Diagnosis string `json:"diagnosis,omitempty"`
+	Notes    string  `json:"notes,omitempty"`
+	VetName  string  `json:"vetName,omitempty"`
+}
+
+// GetPetProcedures returns public procedure list for a pet, filtered by tp.
+// @Summary Get public pet procedures
+// @Tags public
+// @Produce json
+// @Param id path int true "Pet ID"
+// @Param tp query int false "Procedure type"
+// @Success 200 {array} PublicProcedureItem
+// @Failure 404 {object} ErrorResponse
+// @Router /public/pets/{id}/procedures [get]
+func (h *PublicHandler) GetPetProcedures(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var pet models.Pet
+	if err := h.db.First(&pet, id).Error; err != nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
+		return
+	}
+
+	petID := strconv.Itoa(int(pet.ID))
+	tpStr := r.URL.Query().Get("tp")
+
+	// Special case: tp=999 returns allergies
+	if tpStr == "999" {
+		var allergies []models.Allergy
+		h.db.Where("uuid = ?", petID).Order("id DESC").Find(&allergies)
+
+		items := make([]PublicProcedureItem, 0, len(allergies))
+		for _, a := range allergies {
+			items = append(items, PublicProcedureItem{
+				ID:        strconv.Itoa(int(a.ID)),
+				Date:      a.Date,
+				Name:      a.Name,
+				Notes:     "",
+			})
+		}
+		writeJSON(w, http.StatusOK, items)
+		return
+	}
+
+	query := h.db.Where("uuid = ?", petID)
+	if tpStr != "" {
+		query = query.Where("tp = ?", tpStr)
+	}
+
+	var procs []models.Procedure
+	query.Order("date DESC, id DESC").Find(&procs)
+
+	items := make([]PublicProcedureItem, 0, len(procs))
+	for _, p := range procs {
+		item := PublicProcedureItem{
+			ID:        strconv.Itoa(int(p.ID)),
+			Date:      p.Date,
+			NextDate:  p.Date2,
+			Name:      p.Vac,
+			Diagnosis: p.Diagn,
+			Notes:     p.Nout,
+			VetName:   p.PName,
+		}
+		items = append(items, item)
+	}
+
+	writeJSON(w, http.StatusOK, items)
+}
+
 // writePetProfile builds and writes the public pet profile response.
 func (h *PublicHandler) writePetProfile(w http.ResponseWriter, pet models.Pet) {
 	petID := strconv.Itoa(int(pet.ID))

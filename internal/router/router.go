@@ -77,6 +77,7 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 	// Public pet profile (no auth — used by QR code scanning)
 	r.Get("/api/public/pets/code/{code}", publicHandler.LookupByCode)
 	r.Get("/api/public/pets/{id}", publicHandler.GetPet)
+	r.Get("/api/public/pets/{id}/procedures", publicHandler.GetPetProcedures)
 
 	// --- Protected routes (JWT required) ---
 	r.Route("/api", func(r chi.Router) {
