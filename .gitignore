@@ -10,10 +10,6 @@ tmp/
 /verify
 /paystats
 
-# Generated swagger docs
-docs/docs.go
-docs/swagger.json
-docs/swagger.yaml
 
 # IDE
 .idea/

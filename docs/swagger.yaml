@@ -1,0 +1,3117 @@
+basePath: /api
+definitions:
+  internal_handlers.AccessCodeResponse:
+    properties:
+      code:
+        type: string
+    required:
+    - code
+    type: object
+  internal_handlers.AdminStats:
+    properties:
+      active_accounts:
+        type: integer
+      payment_tiers:
+        items:
+          $ref: '#/definitions/internal_handlers.PaymentTier'
+        type: array
+      pets_per_clinic:
+        items:
+          $ref: '#/definitions/internal_handlers.ClinicPetCount'
+        type: array
+      total_cats:
+        type: integer
+      total_dogs:
+        type: integer
+      total_other:
+        type: integer
+      total_owners:
+        type: integer
+      total_pets:
+        type: integer
+      total_vets:
+        type: integer
+    required:
+    - active_accounts
+    - payment_tiers
+    - pets_per_clinic
+    - total_cats
+    - total_dogs
+    - total_other
+    - total_owners
+    - total_pets
+    - total_vets
+    type: object
+  internal_handlers.AllergyResponse:
+    properties:
+      date:
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+      uuid:
+        type: string
+    required:
+    - date
+    - id
+    - name
+    - uuid
+    type: object
+  internal_handlers.AppointmentResponse:
+    properties:
+      date:
+        type: string
+      id:
+        type: integer
+      koment:
+        type: string
+      owner:
+        type: string
+      ownern:
+        type: string
+      phone:
+        type: string
+      pname:
+        type: string
+      status:
+        type: string
+      time:
+        type: string
+      tpname:
+        type: string
+      uuid:
+        type: string
+      vetname:
+        type: string
+    required:
+    - date
+    - id
+    - koment
+    - owner
+    - ownern
+    - phone
+    - pname
+    - status
+    - time
+    - tpname
+    - uuid
+    - vetname
+    type: object
+  internal_handlers.AssignSlotRequest:
+    properties:
+      time:
+        type: string
+      vetname:
+        type: string
+    required:
+    - time
+    type: object
+  internal_handlers.BreedCount:
+    properties:
+      breed:
+        type: string
+      count:
+        type: integer
+    required:
+    - breed
+    - count
+    type: object
+  internal_handlers.CalendarItem:
+    properties:
+      date:
+        type: string
+      name:
+        type: string
+      petId:
+        type: string
+      petName:
+        type: string
+      type:
+        type: string
+    required:
+    - date
+    - name
+    - petId
+    - petName
+    - type
+    type: object
+  internal_handlers.CertificateResponse:
+    properties:
+      dehelminization:
+        $ref: '#/definitions/internal_handlers.MedicalRecord'
+      ectoparasite:
+        $ref: '#/definitions/internal_handlers.MedicalRecord'
+      pet:
+        $ref: '#/definitions/internal_handlers.PetListItem'
+      rabies:
+        $ref: '#/definitions/internal_handlers.MedicalRecord'
+      vaccination:
+        $ref: '#/definitions/internal_handlers.MedicalRecord'
+    required:
+    - dehelminization
+    - ectoparasite
+    - pet
+    - rabies
+    - vaccination
+    type: object
+  internal_handlers.CheckoutRequest:
+    properties:
+      package_id:
+        type: integer
+      pet_id:
+        type: integer
+    required:
+    - package_id
+    - pet_id
+    type: object
+  internal_handlers.CheckoutResponse:
+    properties:
+      order_id:
+        type: string
+      redirect_url:
+        type: string
+    required:
+    - order_id
+    - redirect_url
+    type: object
+  internal_handlers.ClinicPetCount:
+    properties:
+      clinic:
+        type: string
+      count:
+        type: integer
+    required:
+    - clinic
+    - count
+    type: object
+  internal_handlers.ClinicStats:
+    properties:
+      monthlyTrends:
+        items:
+          $ref: '#/definitions/internal_handlers.MonthlyTrendItem'
+        type: array
+      sexDistribution:
+        items:
+          $ref: '#/definitions/internal_handlers.SexCount'
+        type: array
+      speciesBreakdown:
+        items:
+          $ref: '#/definitions/internal_handlers.SpeciesCount'
+        type: array
+      topBreeds:
+        items:
+          $ref: '#/definitions/internal_handlers.BreedCount'
+        type: array
+      topProcedures:
+        items:
+          $ref: '#/definitions/internal_handlers.ProcedureCount'
+        type: array
+      topVaccines:
+        items:
+          $ref: '#/definitions/internal_handlers.VaccineCount'
+        type: array
+      totalOwners:
+        type: integer
+      totalPets:
+        type: integer
+      totalRecords:
+        type: integer
+    required:
+    - monthlyTrends
+    - sexDistribution
+    - speciesBreakdown
+    - topBreeds
+    - topProcedures
+    - topVaccines
+    - totalOwners
+    - totalPets
+    - totalRecords
+    type: object
+  internal_handlers.CreateAllergyRequest:
+    properties:
+      date:
+        description: Date recorded
+        type: string
+      name:
+        description: Allergy name
+        type: string
+      uuid:
+        description: Pet ID
+        type: string
+    required:
+    - name
+    - uuid
+    type: object
+  internal_handlers.CreateAppointmentRequest:
+    properties:
+      date:
+        description: Date (YYYY-MM-DD)
+        type: string
+      koment:
+        description: Notes
+        type: string
+      owner:
+        description: Owner personal ID
+        type: string
+      ownern:
+        description: Owner name
+        type: string
+      phone:
+        description: Owner phone
+        type: string
+      pname:
+        description: Pet name
+        type: string
+      status:
+        description: Status
+        type: string
+      time:
+        description: Time slot
+        type: string
+      tpname:
+        description: Procedure type
+        type: string
+      uuid:
+        description: Pet ID
+        type: string
+    required:
+    - date
+    - uuid
+    type: object
+  internal_handlers.CreatePetRequest:
+    properties:
+      chip:
+        type: string
+      code:
+        type: string
+      color:
+        type: string
+      date:
+        type: string
+      email:
+        type: string
+      first_name:
+        type: string
+      name:
+        type: string
+      pet:
+        type: string
+      phone:
+        type: string
+      sex:
+        type: string
+      uuid:
+        type: string
+      variety:
+        type: string
+    required:
+    - name
+    - uuid
+    type: object
+  internal_handlers.CreatePriceRequest:
+    properties:
+      name:
+        type: string
+      price:
+        type: string
+    required:
+    - name
+    - price
+    type: object
+  internal_handlers.CreateProcedureRequest:
+    properties:
+      anam:
+        type: string
+      coment:
+        type: string
+      dani:
+        type: string
+      date:
+        type: string
+      date2:
+        type: string
+      date3:
+        type: string
+      diagn:
+        type: string
+      koment:
+        type: string
+      nout:
+        type: string
+      owner:
+        type: string
+      ownern:
+        type: string
+      phone:
+        type: string
+      pname:
+        type: string
+      price:
+        type: string
+      tp:
+        minimum: 1
+        type: integer
+      tpname:
+        type: string
+      uuid:
+        type: string
+      vac:
+        type: string
+      vac1:
+        type: string
+      vac2:
+        type: string
+      vac3:
+        type: string
+      vac4:
+        type: string
+      vac5:
+        type: string
+      vac6:
+        type: string
+      vac7:
+        type: string
+      vac8:
+        type: string
+      vac9:
+        type: string
+      vacn:
+        type: string
+    required:
+    - tp
+    - uuid
+    type: object
+  internal_handlers.CreateShopRequest:
+    properties:
+      date:
+        type: string
+      name:
+        type: string
+      price:
+        type: string
+    required:
+    - date
+    - name
+    - price
+    type: object
+  internal_handlers.CreateStaffRequest:
+    properties:
+      email:
+        type: string
+      first_name:
+        type: string
+      last_name:
+        type: string
+      password:
+        minLength: 1
+        type: string
+      phone:
+        type: string
+    required:
+    - email
+    - first_name
+    - last_name
+    - password
+    type: object
+  internal_handlers.DailySummary:
+    properties:
+      card:
+        type: string
+      cash:
+        type: string
+      date:
+        type: string
+      total:
+        type: string
+    required:
+    - card
+    - cash
+    - date
+    - total
+    type: object
+  internal_handlers.EctoOptionsResponse:
+    properties:
+      collars:
+        items:
+          $ref: '#/definitions/internal_handlers.SelectOption'
+        type: array
+      drops:
+        items:
+          $ref: '#/definitions/internal_handlers.SelectOption'
+        type: array
+      tablets:
+        items:
+          $ref: '#/definitions/internal_handlers.SelectOption'
+        type: array
+    required:
+    - collars
+    - drops
+    - tablets
+    type: object
+  internal_handlers.ErrorResponse:
+    properties:
+      error:
+        type: string
+    required:
+    - error
+    type: object
+  internal_handlers.LoginRequest:
+    properties:
+      email:
+        type: string
+      password:
+        minLength: 1
+        type: string
+    required:
+    - email
+    - password
+    type: object
+  internal_handlers.LoginResponse:
+    properties:
+      access_token:
+        type: string
+      refreshToken:
+        description: camelCase — frontend expects this
+        type: string
+    required:
+    - access_token
+    - refreshToken
+    type: object
+  internal_handlers.MedicalRecord:
+    properties:
+      anamnesis:
+        type: string
+      comment:
+        type: string
+      date:
+        type: string
+      diagnosis:
+        type: string
+      id:
+        type: string
+      notes:
+        type: string
+      price:
+        type: string
+      procedureName:
+        type: string
+      procedureType:
+        type: string
+      tests:
+        items:
+          type: string
+        type: array
+      vaccinations:
+        items:
+          type: string
+        type: array
+      vetName:
+        type: string
+    required:
+    - anamnesis
+    - comment
+    - diagnosis
+    - id
+    - notes
+    - price
+    - procedureName
+    - procedureType
+    - tests
+    - vaccinations
+    - vetName
+    type: object
+  internal_handlers.MessageResponse:
+    properties:
+      message:
+        type: string
+    required:
+    - message
+    type: object
+  internal_handlers.MonthlyTrendItem:
+    properties:
+      month:
+        type: string
+      records:
+        type: integer
+    required:
+    - month
+    - records
+    type: object
+  internal_handlers.OTPSendRequest:
+    properties:
+      phone:
+        type: string
+      type:
+        enum:
+        - register
+        - recovery
+        type: string
+    required:
+    - phone
+    - type
+    type: object
+  internal_handlers.OTPSendResponse:
+    properties:
+      otp_id:
+        type: integer
+    required:
+    - otp_id
+    type: object
+  internal_handlers.OTPVerifyRequest:
+    properties:
+      code:
+        type: string
+      otp_id:
+        type: integer
+    required:
+    - code
+    - otp_id
+    type: object
+  internal_handlers.OTPVerifyResponse:
+    properties:
+      verified:
+        type: boolean
+    required:
+    - verified
+    type: object
+  internal_handlers.OwnerCreatePetRequest:
+    properties:
+      chip:
+        type: string
+      color:
+        type: string
+      date:
+        type: string
+      name:
+        type: string
+      pet:
+        type: string
+      sex:
+        type: string
+      variety:
+        type: string
+    required:
+    - name
+    type: object
+  internal_handlers.OwnerPetDetail:
+    properties:
+      birth:
+        type: string
+      breed:
+        type: string
+      castrated:
+        type: boolean
+      chip:
+        type: string
+      code:
+        type: string
+      color:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      sex:
+        type: string
+      species:
+        type: string
+      subscriptionExpiry:
+        type: string
+      subscriptionStatus:
+        description: '"active", "expired", "unregistered"'
+        type: string
+      uuid:
+        type: string
+      vet:
+        type: string
+    required:
+    - breed
+    - castrated
+    - chip
+    - code
+    - color
+    - id
+    - name
+    - sex
+    - species
+    - subscriptionStatus
+    - uuid
+    - vet
+    type: object
+  internal_handlers.OwnerPetItem:
+    properties:
+      birth:
+        type: string
+      breed:
+        type: string
+      chip:
+        type: string
+      color:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      sex:
+        type: string
+      species:
+        type: string
+      subscriptionExpiry:
+        type: string
+      subscriptionStatus:
+        description: '"active", "expired", "unregistered"'
+        type: string
+    required:
+    - breed
+    - chip
+    - color
+    - id
+    - name
+    - sex
+    - species
+    - subscriptionStatus
+    type: object
+  internal_handlers.OwnerProcedureItem:
+    properties:
+      comment:
+        type: string
+      date:
+        type: string
+      diagnosis:
+        type: string
+      id:
+        type: string
+      nextDate:
+        type: string
+      notes:
+        type: string
+      procedureName:
+        type: string
+      procedureType:
+        type: string
+      vaccinations:
+        items:
+          type: string
+        type: array
+      vetName:
+        type: string
+    required:
+    - comment
+    - diagnosis
+    - id
+    - notes
+    - procedureName
+    - procedureType
+    - vaccinations
+    - vetName
+    type: object
+  internal_handlers.OwnerVisit:
+    properties:
+      date:
+        type: string
+      id:
+        type: integer
+      operation:
+        type: string
+      status:
+        type: string
+      time:
+        type: string
+      vetName:
+        type: string
+    required:
+    - date
+    - id
+    - operation
+    - status
+    - time
+    - vetName
+    type: object
+  internal_handlers.OwnerWithPets:
+    properties:
+      email:
+        type: string
+      name:
+        type: string
+      personalId:
+        type: string
+      petCount:
+        type: integer
+      pets:
+        items:
+          $ref: '#/definitions/internal_handlers.PetListItem'
+        type: array
+      phone:
+        type: string
+    required:
+    - email
+    - name
+    - personalId
+    - petCount
+    - pets
+    - phone
+    type: object
+  internal_handlers.PackageResponse:
+    properties:
+      duration:
+        type: integer
+      id:
+        type: integer
+      name:
+        type: string
+      price:
+        type: string
+    required:
+    - duration
+    - id
+    - name
+    - price
+    type: object
+  internal_handlers.PaginatedResponse:
+    properties:
+      data: {}
+      page:
+        type: integer
+      pageSize:
+        type: integer
+      total:
+        type: integer
+      totalPages:
+        type: integer
+    required:
+    - data
+    - page
+    - pageSize
+    - total
+    - totalPages
+    type: object
+  internal_handlers.PasswordResetRequest:
+    properties:
+      new_password:
+        minLength: 1
+        type: string
+      otp_code:
+        type: string
+      otp_id:
+        type: integer
+    required:
+    - new_password
+    - otp_code
+    - otp_id
+    type: object
+  internal_handlers.PaymentResponse:
+    properties:
+      amount:
+        type: string
+      date:
+        type: string
+      id:
+        type: integer
+      method:
+        type: string
+      owner:
+        type: string
+      uuid:
+        type: string
+      vet_id:
+        type: string
+    required:
+    - amount
+    - date
+    - id
+    - method
+    - owner
+    - uuid
+    - vet_id
+    type: object
+  internal_handlers.PaymentTier:
+    properties:
+      count:
+        type: integer
+      price:
+        type: string
+    required:
+    - count
+    - price
+    type: object
+  internal_handlers.PetDetail:
+    properties:
+      birth:
+        type: string
+      birth2:
+        type: string
+      breed:
+        type: string
+      castDate:
+        type: string
+      castrated:
+        type: boolean
+      chip:
+        type: string
+      code:
+        type: string
+      color:
+        type: string
+      date:
+        type: string
+      id:
+        type: string
+      medicalRecords:
+        items:
+          $ref: '#/definitions/internal_handlers.MedicalRecord'
+        type: array
+      name:
+        type: string
+      ownerEmail:
+        type: string
+      ownerName:
+        type: string
+      ownerPersonalId:
+        type: string
+      ownerPhone:
+        type: string
+      sex:
+        type: string
+      species:
+        type: string
+      status:
+        type: string
+      uuid:
+        type: string
+      variety:
+        type: string
+      vet:
+        type: string
+    required:
+    - breed
+    - castrated
+    - chip
+    - code
+    - color
+    - id
+    - medicalRecords
+    - name
+    - ownerEmail
+    - ownerName
+    - ownerPersonalId
+    - ownerPhone
+    - sex
+    - species
+    - status
+    - uuid
+    - variety
+    - vet
+    type: object
+  internal_handlers.PetListItem:
+    properties:
+      birth:
+        type: string
+      breed:
+        type: string
+      chip:
+        type: string
+      color:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      ownerName:
+        type: string
+      ownerPhone:
+        type: string
+      sex:
+        type: string
+      species:
+        type: string
+    required:
+    - breed
+    - chip
+    - color
+    - id
+    - name
+    - ownerName
+    - ownerPhone
+    - sex
+    - species
+    type: object
+  internal_handlers.PriceResponse:
+    properties:
+      id:
+        type: integer
+      name:
+        type: string
+      price:
+        type: string
+    required:
+    - id
+    - name
+    - price
+    type: object
+  internal_handlers.ProcedureCount:
+    properties:
+      count:
+        type: integer
+      name:
+        type: string
+      type:
+        type: string
+    required:
+    - count
+    - name
+    - type
+    type: object
+  internal_handlers.ProcedureTypeItem:
+    properties:
+      name:
+        type: string
+      tp:
+        type: integer
+    required:
+    - name
+    - tp
+    type: object
+  internal_handlers.RecordPaymentRequest:
+    properties:
+      amount:
+        description: Amount in GEL
+        type: string
+      date:
+        description: Payment date
+        type: string
+      method:
+        description: card or cash
+        enum:
+        - card
+        - cash
+        type: string
+      owner:
+        description: Owner personal ID
+        type: string
+      procedure_ids:
+        description: Procedure IDs to mark as paid
+        items:
+          type: integer
+        type: array
+      uuid:
+        description: Pet ID
+        type: string
+    required:
+    - amount
+    - date
+    - method
+    - uuid
+    type: object
+  internal_handlers.RefreshRequest:
+    properties:
+      refresh_token:
+        type: string
+    required:
+    - refresh_token
+    type: object
+  internal_handlers.RegisterRequest:
+    properties:
+      email:
+        type: string
+      first_name:
+        type: string
+      group_id:
+        type: integer
+      last_name:
+        type: string
+      password:
+        minLength: 1
+        type: string
+      phone:
+        type: string
+      zip:
+        type: string
+    required:
+    - email
+    - first_name
+    - last_name
+    - password
+    type: object
+  internal_handlers.ReminderResult:
+    properties:
+      birthdays_sent:
+        type: integer
+      errors:
+        type: integer
+      expired_sent:
+        type: integer
+      procedures_sent:
+        type: integer
+    required:
+    - birthdays_sent
+    - errors
+    - expired_sent
+    - procedures_sent
+    type: object
+  internal_handlers.SelectOption:
+    properties:
+      label:
+        type: string
+      value:
+        type: string
+    required:
+    - label
+    - value
+    type: object
+  internal_handlers.SexCount:
+    properties:
+      count:
+        type: integer
+      sex:
+        type: string
+    required:
+    - count
+    - sex
+    type: object
+  internal_handlers.ShopResponse:
+    properties:
+      date:
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+      price:
+        type: string
+      vetname:
+        type: string
+    required:
+    - date
+    - id
+    - name
+    - price
+    - vetname
+    type: object
+  internal_handlers.SpeciesCount:
+    properties:
+      count:
+        type: integer
+      species:
+        type: string
+    required:
+    - count
+    - species
+    type: object
+  internal_handlers.StaffResponse:
+    properties:
+      email:
+        type: string
+      first_name:
+        type: string
+      id:
+        type: integer
+      last_name:
+        type: string
+      phone:
+        type: string
+      status:
+        type: string
+    required:
+    - email
+    - first_name
+    - id
+    - last_name
+    - phone
+    - status
+    type: object
+  internal_handlers.TimeSlot:
+    properties:
+      available:
+        type: boolean
+      time:
+        type: string
+    required:
+    - available
+    - time
+    type: object
+  internal_handlers.UserResponse:
+    properties:
+      company_name:
+        type: string
+      email:
+        type: string
+      first_name:
+        type: string
+      group_id:
+        type: integer
+      id:
+        type: integer
+      last_name:
+        type: string
+      phone:
+        type: string
+      status:
+        type: string
+      zip:
+        type: string
+    required:
+    - company_name
+    - email
+    - first_name
+    - group_id
+    - id
+    - last_name
+    - phone
+    - status
+    - zip
+    type: object
+  internal_handlers.VaccineCount:
+    properties:
+      count:
+        type: integer
+      name:
+        type: string
+    required:
+    - count
+    - name
+    type: object
+  internal_handlers.VaccineOptionsResponse:
+    properties:
+      brands:
+        items:
+          $ref: '#/definitions/internal_handlers.SelectOption'
+        type: array
+      vaccines:
+        items:
+          $ref: '#/definitions/internal_handlers.SelectOption'
+        type: array
+    required:
+    - brands
+    - vaccines
+    type: object
+  vetapp-backend_internal_models.Procedure:
+    properties:
+      anam:
+        description: Anamnesis
+        type: string
+      coment:
+        description: Comment (visible to owner)
+        type: string
+      dani:
+        description: Prescription
+        type: string
+      date:
+        description: Procedure date
+        type: string
+      date2:
+        description: Next due date
+        type: string
+      date3:
+        description: Reminder date
+        type: string
+      diagn:
+        description: Diagnosis
+        type: string
+      id:
+        type: integer
+      koment:
+        description: Vet notes (internal)
+        type: string
+      nout:
+        description: Treatment
+        type: string
+      owner:
+        description: Owner personal ID
+        type: string
+      ownern:
+        description: Owner name (denormalized)
+        type: string
+      phone:
+        description: 'Payment status: "0"=unpaid, "1"=paid'
+        type: string
+      pname:
+        description: Pet name (denormalized)
+        type: string
+      price:
+        description: Price in GEL
+        type: string
+      sk:
+        description: Clinic zip
+        type: string
+      tp:
+        description: Procedure type code
+        type: integer
+      tpname:
+        description: Procedure type name
+        type: string
+      uuid:
+        description: Pet ID (as string)
+        type: string
+      vac:
+        description: Vaccine/procedure name
+        type: string
+      vac1:
+        description: Test result fields
+        type: string
+      vac2:
+        type: string
+      vac3:
+        type: string
+      vac4:
+        type: string
+      vac5:
+        type: string
+      vac6:
+        type: string
+      vac7:
+        type: string
+      vac8:
+        type: string
+      vac9:
+        type: string
+      vacn:
+        description: Brand
+        type: string
+      vetname:
+        description: Vet member ID
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: Veterinary clinic management API
+  title: VetApp API
+  version: "1.0"
+paths:
+  /allergies:
+    get:
+      parameters:
+      - description: Pet ID
+        in: query
+        name: pet_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.AllergyResponse'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List allergies
+      tags:
+      - allergies
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Allergy data
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.CreateAllergyRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handlers.AllergyResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Add allergy
+      tags:
+      - allergies
+  /allergies/{id}:
+    delete:
+      parameters:
+      - description: Allergy ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MessageResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete allergy
+      tags:
+      - allergies
+  /appointments:
+    get:
+      parameters:
+      - description: Clinic code
+        in: query
+        name: clinic
+        type: string
+      - description: Start date (YYYY-MM-DD)
+        in: query
+        name: date_from
+        type: string
+      - description: End date (YYYY-MM-DD)
+        in: query
+        name: date_to
+        type: string
+      - description: Vet member ID
+        in: query
+        name: vet_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.AppointmentResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List appointments
+      tags:
+      - appointments
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Appointment data
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.CreateAppointmentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handlers.AppointmentResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Book appointment
+      tags:
+      - appointments
+  /appointments/{id}:
+    delete:
+      parameters:
+      - description: Appointment ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MessageResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Cancel appointment
+      tags:
+      - appointments
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Appointment ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.AppointmentResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update appointment
+      tags:
+      - appointments
+  /appointments/{id}/slot:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Appointment ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Slot assignment
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.AssignSlotRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.AppointmentResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Assign time slot
+      tags:
+      - appointments
+  /appointments/slots:
+    get:
+      parameters:
+      - description: Clinic code
+        in: query
+        name: clinic
+        type: string
+      - description: Vet member ID
+        in: query
+        name: vet_id
+        type: string
+      - description: Date (YYYY-MM-DD)
+        in: query
+        name: date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.TimeSlot'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get available time slots
+      tags:
+      - appointments
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Login credentials
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.LoginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      summary: Login
+      tags:
+      - auth
+  /auth/me:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.UserResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get current user
+      tags:
+      - auth
+  /auth/otp/send:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Phone and type
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.OTPSendRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.OTPSendResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      summary: Send OTP
+      tags:
+      - auth
+  /auth/otp/verify:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: OTP ID and code
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.OTPVerifyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.OTPVerifyResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      summary: Verify OTP
+      tags:
+      - auth
+  /auth/password-reset:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: OTP and new password
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.PasswordResetRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      summary: Reset password
+      tags:
+      - auth
+  /auth/refresh:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Refresh token
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.RefreshRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.LoginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      summary: Refresh tokens
+      tags:
+      - auth
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Registration details
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handlers.LoginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      summary: Register
+      tags:
+      - auth
+  /notifications/sms/reminders:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.ReminderResult'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Send SMS reminders
+      tags:
+      - notifications
+  /owner/calendar:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.CalendarItem'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Owner calendar (upcoming procedures)
+      tags:
+      - owner
+  /owner/pets:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.OwnerPetItem'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List owner's pets
+      tags:
+      - owner
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Pet data
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.OwnerCreatePetRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handlers.OwnerPetItem'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Owner adds pet
+      tags:
+      - owner
+  /owner/pets/{id}:
+    get:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.OwnerPetDetail'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get owner's pet detail
+      tags:
+      - owner
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.OwnerPetItem'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Owner updates pet
+      tags:
+      - owner
+  /owner/pets/{id}/code:
+    get:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.AccessCodeResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Generate pet access code
+      tags:
+      - owner
+  /owner/pets/{id}/procedures:
+    get:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Procedure type code (999 for allergies)
+        in: query
+        name: tp
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.OwnerProcedureItem'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get pet procedures (owner view)
+      tags:
+      - owner
+  /owner/visits:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.OwnerVisit'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Owner visits (appointments)
+      tags:
+      - owner
+  /owners:
+    get:
+      parameters:
+      - description: Search by name, phone, email
+        in: query
+        name: search
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Page size
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.PaginatedResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List owners
+      tags:
+      - owners
+  /owners/{personalId}:
+    get:
+      parameters:
+      - description: Owner personal ID
+        in: path
+        name: personalId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.OwnerWithPets'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get owner by personal ID
+      tags:
+      - owners
+  /payments/daily:
+    get:
+      parameters:
+      - description: Clinic code
+        in: query
+        name: clinic
+        type: string
+      - description: Date (YYYY-MM-DD)
+        in: query
+        name: date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.DailySummary'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Daily payment summary
+      tags:
+      - payments
+  /payments/history:
+    get:
+      parameters:
+      - description: Clinic code
+        in: query
+        name: clinic
+        type: string
+      - description: Vet member ID
+        in: query
+        name: vet_id
+        type: string
+      - description: Start date (YYYY-MM-DD)
+        in: query
+        name: date_from
+        type: string
+      - description: End date (YYYY-MM-DD)
+        in: query
+        name: date_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.PaymentResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Payment history
+      tags:
+      - payments
+  /payments/record:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Payment data
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.RecordPaymentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handlers.PaymentResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Record payment
+      tags:
+      - payments
+  /pets:
+    get:
+      parameters:
+      - description: Search by name, phone, chip
+        in: query
+        name: search
+        type: string
+      - description: Filter by owner personal ID
+        in: query
+        name: owner_id
+        type: string
+      - description: Filter by microchip
+        in: query
+        name: chip
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Page size
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.PaginatedResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List pets
+      tags:
+      - pets
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Pet data
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.CreatePetRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handlers.PetListItem'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create pet
+      tags:
+      - pets
+  /pets/{id}:
+    delete:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MessageResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete pet
+      tags:
+      - pets
+    get:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.PetDetail'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get pet by ID
+      tags:
+      - pets
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.PetListItem'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update pet
+      tags:
+      - pets
+  /pets/{id}/certificate:
+    get:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.CertificateResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get pet certificate data
+      tags:
+      - pets
+  /pets/{id}/history:
+    get:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.MedicalRecord'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get pet medical history
+      tags:
+      - pets
+  /prices:
+    get:
+      parameters:
+      - description: Clinic code
+        in: query
+        name: clinic
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.PriceResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List prices
+      tags:
+      - prices
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Price data
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.CreatePriceRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handlers.PriceResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Add price
+      tags:
+      - prices
+  /prices/{id}:
+    delete:
+      parameters:
+      - description: Price ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MessageResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete price
+      tags:
+      - prices
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Price ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.PriceResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update price
+      tags:
+      - prices
+  /procedures:
+    get:
+      parameters:
+      - description: Clinic code
+        in: query
+        name: clinic
+        type: string
+      - description: Start date (YYYY-MM-DD)
+        in: query
+        name: date_from
+        type: string
+      - description: End date (YYYY-MM-DD)
+        in: query
+        name: date_to
+        type: string
+      - description: Vet member ID
+        in: query
+        name: vet_id
+        type: string
+      - description: Pet ID
+        in: query
+        name: pet_id
+        type: string
+      - description: Procedure type code
+        in: query
+        name: tp
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/vetapp-backend_internal_models.Procedure'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List procedures
+      tags:
+      - procedures
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Procedure data
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.CreateProcedureRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/vetapp-backend_internal_models.Procedure'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create procedure
+      tags:
+      - procedures
+  /procedures/{id}:
+    delete:
+      parameters:
+      - description: Procedure ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MessageResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete procedure
+      tags:
+      - procedures
+    get:
+      parameters:
+      - description: Procedure ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/vetapp-backend_internal_models.Procedure'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get procedure by ID
+      tags:
+      - procedures
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Procedure ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/vetapp-backend_internal_models.Procedure'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update procedure
+      tags:
+      - procedures
+  /procedures/dehel-options:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.SelectOption'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: List dehelminization options
+      tags:
+      - procedures
+  /procedures/ecto-options:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.EctoOptionsResponse'
+      security:
+      - BearerAuth: []
+      summary: List ectoparasite options
+      tags:
+      - procedures
+  /procedures/test-options:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.SelectOption'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: List test options
+      tags:
+      - procedures
+  /procedures/types:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.ProcedureTypeItem'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: List procedure types
+      tags:
+      - procedures
+  /procedures/vaccine-options:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.VaccineOptionsResponse'
+      security:
+      - BearerAuth: []
+      summary: List vaccine options
+      tags:
+      - procedures
+  /shop:
+    get:
+      parameters:
+      - description: Clinic code
+        in: query
+        name: clinic
+        type: string
+      - description: Start date (YYYY-MM-DD)
+        in: query
+        name: date_from
+        type: string
+      - description: End date (YYYY-MM-DD)
+        in: query
+        name: date_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.ShopResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List sales
+      tags:
+      - shop
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Sale data
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.CreateShopRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handlers.ShopResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Add sale
+      tags:
+      - shop
+  /shop/{id}:
+    delete:
+      parameters:
+      - description: Sale ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MessageResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete sale
+      tags:
+      - shop
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Sale ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.ShopResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update sale
+      tags:
+      - shop
+  /staff:
+    get:
+      parameters:
+      - description: Clinic code
+        in: query
+        name: clinic
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.StaffResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List staff
+      tags:
+      - staff
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Staff data
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.CreateStaffRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handlers.StaffResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Add staff member
+      tags:
+      - staff
+  /staff/{id}:
+    delete:
+      parameters:
+      - description: Staff member ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MessageResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Remove staff member
+      tags:
+      - staff
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Staff member ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.StaffResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update staff member
+      tags:
+      - staff
+  /stats/admin:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.AdminStats'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get admin statistics
+      tags:
+      - stats
+  /stats/clinic:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.ClinicStats'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get clinic statistics
+      tags:
+      - stats
+  /subscriptions/callback:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: iPay callback data
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      summary: iPay payment callback
+      tags:
+      - subscriptions
+  /subscriptions/checkout:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Checkout data
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.CheckoutRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.CheckoutResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create checkout session
+      tags:
+      - subscriptions
+  /subscriptions/packages:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.PackageResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      summary: List subscription packages
+      tags:
+      - subscriptions
+securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
