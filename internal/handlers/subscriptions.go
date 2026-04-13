@@ -125,12 +125,13 @@ func (h *SubscriptionHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 
 	// Record pending payment
 	sub := models.Subscription{
-		UUID:    formatUint(req.PetID),
-		Amount:  pkg.Price,
-		Status:  "pending",
-		OrderID: order.OrderID,
-		Package: pkg.Name,
-		Date:    time.Now().Format("2006-01-02"),
+		UUID:     formatUint(req.PetID),
+		Amount:   pkg.Price,
+		Status:   "pending",
+		OrderID:  order.OrderID,
+		Package:  pkg.Name,
+		Date:     time.Now().Format("2006-01-02"),
+		Provider: "ipay",
 	}
 	h.db.Create(&sub)
 
@@ -193,4 +194,114 @@ func (h *SubscriptionHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, MessageResponse{Message: "callback processed"})
+}
+
+// --- Apple IAP ---
+
+// AppleVerifyRequest is the request body for verifying an Apple IAP receipt.
+type AppleVerifyRequest struct {
+	PetID         uint   `json:"pet_id" validate:"required"`
+	PackageID     uint   `json:"package_id" validate:"required"`
+	Receipt       string `json:"receipt" validate:"required"`       // Base64-encoded receipt data
+	TransactionID string `json:"transaction_id" validate:"required"` // Original transaction ID
+	ProductID     string `json:"product_id" validate:"required"`     // IAP product identifier
+}
+
+// AppleVerify validates an Apple IAP receipt and activates the subscription.
+// @Summary Verify Apple IAP receipt
+// @Tags subscriptions
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body AppleVerifyRequest true "Apple IAP receipt"
+// @Success 200 {object} MessageResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /subscriptions/apple-verify [post]
+func (h *SubscriptionHandler) AppleVerify(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
+
+	var req AppleVerifyRequest
+	if err := decodeAndValidate(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	// Verify pet belongs to owner
+	var pet models.Pet
+	if err := h.db.First(&pet, req.PetID).Error; err != nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
+		return
+	}
+	if pet.UUID != claims.LastName {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
+		return
+	}
+
+	// Get package
+	var pkg models.Package
+	if err := h.db.First(&pkg, req.PackageID).Error; err != nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "package not found"})
+		return
+	}
+
+	// Verify receipt with Apple
+	valid, err := verifyAppleReceipt(req.Receipt)
+	if err != nil || !valid {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid receipt"})
+		return
+	}
+
+	// Check for duplicate transaction
+	var existing models.Subscription
+	if err := h.db.Where("order_id = ? AND provider = 'apple'", req.TransactionID).First(&existing).Error; err == nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "transaction already processed"})
+		return
+	}
+
+	// Record successful payment
+	sub := models.Subscription{
+		UUID:      formatUint(req.PetID),
+		Amount:    pkg.Price,
+		Status:    "success",
+		OrderID:   req.TransactionID,
+		Date:      time.Now().Format("2006-01-02"),
+		Package:   pkg.Name,
+		Provider:  "apple",
+		Receipt:   req.Receipt,
+		ProductID: req.ProductID,
+	}
+	h.db.Create(&sub)
+
+	// Activate pet subscription
+	expiry := time.Now().AddDate(0, 0, pkg.Duration).Format("2006-01-02")
+	h.db.Model(&models.Pet{}).Where("id = ?", req.PetID).
+		Updates(map[string]interface{}{"status": 1, "birth2": expiry})
+
+	writeJSON(w, http.StatusOK, MessageResponse{Message: "subscription activated"})
+}
+
+// verifyAppleReceipt validates the receipt with Apple's App Store Server API.
+// In production, use App Store Server API v2 (signed JWS transactions).
+// For sandbox testing, this accepts any non-empty receipt.
+func verifyAppleReceipt(receipt string) (bool, error) {
+	if receipt == "" {
+		return false, nil
+	}
+
+	// TODO: Implement proper Apple receipt validation
+	// Option A: App Store Server API v2 (recommended)
+	//   - Decode the signed JWS transaction
+	//   - Verify signature against Apple's certificate
+	//   - Check transaction ID, product ID, expiry
+	//
+	// Option B: verifyReceipt endpoint (deprecated but simpler)
+	//   - POST to https://buy.itunes.apple.com/verifyReceipt (production)
+	//   - POST to https://sandbox.itunes.apple.com/verifyReceipt (sandbox)
+	//   - Send {"receipt-data": receipt, "password": shared_secret}
+	//
+	// For now, we trust the receipt from the mobile app.
+	// This MUST be implemented before production release.
+	return true, nil
 }

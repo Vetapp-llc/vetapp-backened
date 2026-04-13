@@ -139,6 +139,7 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 		r.Route("/subscriptions", func(r chi.Router) {
 			r.Use(middleware.RequireRole(models.RoleOwner))
 			r.Post("/checkout", subHandler.Checkout)
+			r.Post("/apple-verify", subHandler.AppleVerify)
 		})
 
 		// Notifications - admin only
