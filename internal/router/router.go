@@ -18,7 +18,7 @@ import (
 )
 
 // Setup creates and configures the Chi router with all routes.
-func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.SMSService, ipayService *services.IPayService) *chi.Mux {
+func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.SMSService, ipayService *services.IPayService, baseURL string) *chi.Mux {
 	r := chi.NewRouter()
 
 	// --- Global middleware ---
@@ -48,7 +48,7 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 	shopHandler := handlers.NewShopHandler(db)
 	staffHandler := handlers.NewStaffHandler(db, authService)
 	ownerPortalHandler := handlers.NewOwnerPortalHandler(db)
-	subHandler := handlers.NewSubscriptionHandler(db, ipayService)
+	subHandler := handlers.NewSubscriptionHandler(db, ipayService, baseURL)
 	notifHandler := handlers.NewNotificationHandler(db, smsService)
 	publicHandler := handlers.NewPublicHandler(db)
 

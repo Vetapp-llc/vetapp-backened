@@ -36,6 +36,9 @@ type Config struct {
 	IPayClientID  string
 	IPaySecretKey string
 	IPayURL       string
+
+	// Public base URL (for iPay callback etc.)
+	BaseURL string
 }
 
 // Load reads configuration from environment variables.
@@ -61,6 +64,7 @@ func Load() (*Config, error) {
 		IPayClientID:     getEnv("IPAY_CLIENT_ID", ""),
 		IPaySecretKey:    getEnv("IPAY_SECRET_KEY", ""),
 		IPayURL:          getEnv("IPAY_URL", "https://ipay.ge"),
+		BaseURL:          getEnv("BASE_URL", "http://localhost:8080"),
 	}
 
 	// Validate required fields

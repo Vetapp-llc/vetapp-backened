@@ -56,7 +56,7 @@ func main() {
 	ipayService := services.NewIPayService(cfg)
 
 	// Setup router with all routes
-	r := router.Setup(db, authService, smsService, ipayService)
+	r := router.Setup(db, authService, smsService, ipayService, cfg.BaseURL)
 
 	// Start server
 	addr := ":" + cfg.Port

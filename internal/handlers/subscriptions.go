@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -16,11 +17,12 @@ import (
 type SubscriptionHandler struct {
 	db          *gorm.DB
 	ipayService *services.IPayService
+	baseURL     string
 }
 
 // NewSubscriptionHandler creates a new SubscriptionHandler.
-func NewSubscriptionHandler(db *gorm.DB, ipayService *services.IPayService) *SubscriptionHandler {
-	return &SubscriptionHandler{db: db, ipayService: ipayService}
+func NewSubscriptionHandler(db *gorm.DB, ipayService *services.IPayService, baseURL string) *SubscriptionHandler {
+	return &SubscriptionHandler{db: db, ipayService: ipayService, baseURL: baseURL}
 }
 
 // --- Request/Response types ---
@@ -109,19 +111,24 @@ func (h *SubscriptionHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get iPay token
+	slog.Info("checkout: getting iPay token", "pet_id", req.PetID, "package_id", req.PackageID, "price", pkg.Price)
 	token, err := h.ipayService.GetToken()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "payment gateway error"})
+		slog.Error("checkout: iPay token failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "payment gateway error: " + err.Error()})
 		return
 	}
 
 	// Create order
-	callbackURL := r.Header.Get("Origin") + "/api/subscriptions/callback"
+	callbackURL := h.baseURL + "/api/subscriptions/callback"
+	slog.Info("checkout: creating iPay order", "callback_url", callbackURL, "amount", pkg.Price)
 	order, err := h.ipayService.CreateOrder(token, pkg.Price, req.PetID, callbackURL)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to create payment order"})
+		slog.Error("checkout: iPay order failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to create payment order: " + err.Error()})
 		return
 	}
+	slog.Info("checkout: order created", "order_id", order.OrderID, "redirect_url", order.RedirectURL)
 
 	// Record pending payment
 	sub := models.Subscription{
@@ -200,11 +207,9 @@ func (h *SubscriptionHandler) Callback(w http.ResponseWriter, r *http.Request) {
 
 // AppleVerifyRequest is the request body for verifying an Apple IAP receipt.
 type AppleVerifyRequest struct {
-	PetID         uint   `json:"pet_id" validate:"required"`
-	PackageID     uint   `json:"package_id" validate:"required"`
-	Receipt       string `json:"receipt" validate:"required"`       // Base64-encoded receipt data
-	TransactionID string `json:"transaction_id" validate:"required"` // Original transaction ID
-	ProductID     string `json:"product_id" validate:"required"`     // IAP product identifier
+	PetID             uint   `json:"pet_id" validate:"required"`
+	PackageID         uint   `json:"package_id" validate:"required"`
+	SignedTransaction string `json:"signed_transaction" validate:"required"` // StoreKit 2 JWS signed transaction
 }
 
 // AppleVerify validates an Apple IAP receipt and activates the subscription.
@@ -246,16 +251,16 @@ func (h *SubscriptionHandler) AppleVerify(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Verify receipt with Apple
-	valid, err := verifyAppleReceipt(req.Receipt)
-	if err != nil || !valid {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid receipt"})
+	// Verify JWS signed transaction from StoreKit 2
+	txInfo, err := services.VerifyAppleJWS(req.SignedTransaction)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid receipt: " + err.Error()})
 		return
 	}
 
 	// Check for duplicate transaction
 	var existing models.Subscription
-	if err := h.db.Where("order_id = ? AND provider = 'apple'", req.TransactionID).First(&existing).Error; err == nil {
+	if err := h.db.Where("order_id = ? AND provider = 'apple'", txInfo.TransactionID).First(&existing).Error; err == nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "transaction already processed"})
 		return
 	}
@@ -265,12 +270,12 @@ func (h *SubscriptionHandler) AppleVerify(w http.ResponseWriter, r *http.Request
 		UUID:      formatUint(req.PetID),
 		Amount:    pkg.Price,
 		Status:    "success",
-		OrderID:   req.TransactionID,
+		OrderID:   txInfo.TransactionID,
 		Date:      time.Now().Format("2006-01-02"),
 		Package:   pkg.Name,
 		Provider:  "apple",
-		Receipt:   req.Receipt,
-		ProductID: req.ProductID,
+		Receipt:   req.SignedTransaction,
+		ProductID: txInfo.ProductID,
 	}
 	h.db.Create(&sub)
 
@@ -282,26 +287,3 @@ func (h *SubscriptionHandler) AppleVerify(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, MessageResponse{Message: "subscription activated"})
 }
 
-// verifyAppleReceipt validates the receipt with Apple's App Store Server API.
-// In production, use App Store Server API v2 (signed JWS transactions).
-// For sandbox testing, this accepts any non-empty receipt.
-func verifyAppleReceipt(receipt string) (bool, error) {
-	if receipt == "" {
-		return false, nil
-	}
-
-	// TODO: Implement proper Apple receipt validation
-	// Option A: App Store Server API v2 (recommended)
-	//   - Decode the signed JWS transaction
-	//   - Verify signature against Apple's certificate
-	//   - Check transaction ID, product ID, expiry
-	//
-	// Option B: verifyReceipt endpoint (deprecated but simpler)
-	//   - POST to https://buy.itunes.apple.com/verifyReceipt (production)
-	//   - POST to https://sandbox.itunes.apple.com/verifyReceipt (sandbox)
-	//   - Send {"receipt-data": receipt, "password": shared_secret}
-	//
-	// For now, we trust the receipt from the mobile app.
-	// This MUST be implemented before production release.
-	return true, nil
-}
