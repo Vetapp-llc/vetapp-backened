@@ -58,6 +58,20 @@ definitions:
     - name
     - uuid
     type: object
+  internal_handlers.AppleVerifyRequest:
+    properties:
+      package_id:
+        type: integer
+      pet_id:
+        type: integer
+      signed_transaction:
+        description: StoreKit 2 JWS signed transaction
+        type: string
+    required:
+    - package_id
+    - pet_id
+    - signed_transaction
+    type: object
   internal_handlers.AppointmentResponse:
     properties:
       date:
@@ -154,6 +168,27 @@ definitions:
     - pet
     - rabies
     - vaccination
+    type: object
+  internal_handlers.ChangePasswordRequest:
+    properties:
+      current_password:
+        minLength: 1
+        type: string
+      new_password:
+        description: 8 chars matches the registration / reset minimum used elsewhere.
+        maxLength: 50
+        minLength: 8
+        type: string
+    required:
+    - current_password
+    - new_password
+    type: object
+  internal_handlers.ChangePasswordResponse:
+    properties:
+      ok:
+        type: boolean
+    required:
+    - ok
     type: object
   internal_handlers.CheckoutRequest:
     properties:
@@ -488,6 +523,17 @@ definitions:
     - sprays
     - tablets
     type: object
+  internal_handlers.EmailVerifySendResponse:
+    properties:
+      detail:
+        description: human-readable note
+        type: string
+      status:
+        description: '"sent" | "pending"'
+        type: string
+    required:
+    - status
+    type: object
   internal_handlers.ErrorResponse:
     properties:
       error:
@@ -650,12 +696,91 @@ definitions:
         type: string
       pet:
         type: string
+      petStatus:
+        description: INHABITANT | ADOPTED | WORKMATE
+        type: string
       sex:
         type: string
       variety:
         type: string
     required:
     - name
+    type: object
+  internal_handlers.OwnerCreateProcedureRequest:
+    properties:
+      anam:
+        type: string
+      coment:
+        type: string
+      dani:
+        type: string
+      date:
+        type: string
+      date2:
+        type: string
+      date3:
+        type: string
+      deh:
+        type: string
+      diagn:
+        type: string
+      nout:
+        type: string
+      ser:
+        type: string
+      tp:
+        minimum: 1
+        type: integer
+      tpname:
+        type: string
+      vac:
+        type: string
+      vac1:
+        type: string
+      vac2:
+        type: string
+      vac3:
+        type: string
+      vac4:
+        type: string
+      vac5:
+        type: string
+      vac6:
+        type: string
+      vac7:
+        type: string
+      vac8:
+        type: string
+      vac9:
+        type: string
+      vacn:
+        type: string
+    required:
+    - tp
+    type: object
+  internal_handlers.OwnerDiseaseItem:
+    properties:
+      date:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+    required:
+    - id
+    - name
+    type: object
+  internal_handlers.OwnerEctoItem:
+    properties:
+      name:
+        description: brand / preparat name
+        type: string
+      type:
+        description: '"drops" | "pills" | "collar" | "spray"'
+        type: string
+    required:
+    - name
+    - type
     type: object
   internal_handlers.OwnerPetDetail:
     properties:
@@ -756,27 +881,62 @@ definitions:
     type: object
   internal_handlers.OwnerProcedureItem:
     properties:
+      addedByOwner:
+        description: true => self-reported, deletable
+        type: boolean
+      anamnesis:
+        description: tp=10x/20x — anamnesis. tp=1/2 — also surfaced if set.
+        type: string
       comment:
         type: string
       date:
         type: string
       diagnosis:
         type: string
+      ectoItems:
+        description: populated only for tp=11 records
+        items:
+          $ref: '#/definitions/internal_handlers.OwnerEctoItem'
+        type: array
       id:
         type: string
       nextDate:
         type: string
       notes:
         type: string
+      preparat:
+        description: tp=1 — vaccine brand. tp=12 — dewormer drug.
+        type: string
+      prescription:
+        description: dani column — prescription / დანიშნულება. Shown on every category.
+        type: string
       procedureName:
         type: string
       procedureType:
+        type: string
+      serial:
+        description: tp=1 — batch / serial number
+        type: string
+      testResults:
+        description: populated only for tp=2/22/222 records
+        items:
+          $ref: '#/definitions/internal_handlers.OwnerTestResult'
+        type: array
+      treatment:
+        description: tp=10x/20x — treatment / medications administered
         type: string
       vaccinations:
         items:
           type: string
         type: array
+      vaccineType:
+        description: tp=1 — vaccine type ("კომპლექსური ვაქცინა")
+        type: string
+      vetFullName:
+        description: resolved "First Last" via JOIN
+        type: string
       vetName:
+        description: raw column value (id or free-text)
         type: string
     required:
     - comment
@@ -787,6 +947,18 @@ definitions:
     - procedureType
     - vaccinations
     - vetName
+    type: object
+  internal_handlers.OwnerTestResult:
+    properties:
+      label:
+        description: human-readable test name (Georgian)
+        type: string
+      result:
+        description: typically "დადებითი" / "უარყოფითი" but can be free text
+        type: string
+    required:
+    - label
+    - result
     type: object
   internal_handlers.OwnerVisit:
     properties:
@@ -1279,12 +1451,33 @@ definitions:
     - available
     - time
     type: object
+  internal_handlers.UpdateMeRequest:
+    properties:
+      address:
+        type: string
+      city:
+        type: string
+      country_id:
+        type: integer
+      first_name:
+        type: string
+      phone:
+        type: string
+    type: object
   internal_handlers.UserResponse:
     properties:
+      address:
+        type: string
+      city:
+        type: string
       company_name:
         type: string
+      country_id:
+        type: integer
       email:
         type: string
+      email_verified:
+        type: boolean
       first_name:
         type: string
       group_id:
@@ -1295,6 +1488,8 @@ definitions:
         type: string
       phone:
         type: string
+      phone_verified:
+        type: boolean
       status:
         type: string
       zip:
@@ -1351,11 +1546,20 @@ definitions:
     type: object
   vetapp-backend_internal_models.Procedure:
     properties:
+      address:
+        description: |-
+          Denormalized identity / housekeeping columns the legacy table also
+          stores. Mostly redundant with Pet but the PHP forms set them on
+          every save and some queries depend on them.
+        type: string
       anam:
         description: Anamnesis
         type: string
       coment:
-        description: Comment (visible to owner)
+        description: Comment visible to owner
+        type: string
+      company:
+        description: payment method label e.g. "ბარათი", "ნაღდი"
         type: string
       dani:
         description: Prescription
@@ -1367,10 +1571,10 @@ definitions:
         description: Next due date
         type: string
       date3:
-        description: Reminder date
+        description: SMS reminder trigger date (= date2 - 1 month)
         type: string
       deh:
-        description: Dehel drug / test result (Canine Babesia)
+        description: Dehel drug-from-list (tp=12) OR Canine Babesia result (tp=2)
         type: string
       diagn:
         description: Diagnosis
@@ -1378,7 +1582,10 @@ definitions:
       id:
         type: integer
       koment:
-        description: Vet notes (internal)
+        description: Vet-internal notes
+        type: string
+      name:
+        description: edit-log message column (NOT the pet name — that's PName)
         type: string
       nout:
         description: Treatment
@@ -1392,32 +1599,65 @@ definitions:
       phone:
         description: 'Payment status: "0"=unpaid, "1"=paid'
         type: string
+      pn:
+        description: owner personal-id copy
+        type: string
       pname:
         description: Pet name (denormalized)
         type: string
       price:
         description: Price in GEL
         type: string
+      sax:
+        description: pet sex denormalized
+        type: string
       ser:
-        description: Vaccine serial/batch number
+        description: Vaccine serial / batch number
         type: string
       sk:
         description: Clinic zip
+        type: string
+      test1:
+        description: |-
+          Extra test-result columns specific to dog tests (tp=2). PHP form
+          at vet/addtest.php uses these for the Caniv 4DX panel + CDV/CAV
+          test slots. Other tps leave them empty.
+        type: string
+      test2:
+        type: string
+      test3:
+        type: string
+      test4:
+        type: string
+      test5:
+        type: string
+      test6:
+        type: string
+      test7:
+        type: string
+      test8:
         type: string
       tp:
         description: Procedure type code
         type: integer
       tpname:
-        description: Procedure type name
+        description: Procedure type display name
         type: string
       uuid:
         description: Pet ID (as string)
         type: string
       vac:
-        description: Vaccine/procedure name
+        description: Vaccine/procedure name OR tp=11 drops-custom OR tp=12 custom
+          drug
         type: string
       vac1:
-        description: Test result fields
+        description: |-
+          Polymorphic content slots. For tp=11 (ecto): drops/pills/collar/
+          spray with custom-text in Vac/Vac2/Vac4/Vac6 and dropdown choice
+          in Vac1/Vac3/Vac5/Vac7. For tp=2/22/222: test panel results. For
+          tp=10x/20x (generic): Vac1=anamnesis, Vac2=diagnosis, Vac3=treatment.
+          Vac8/Vac9 are unused in production data (empty in all rows we've
+          inspected) but kept here for legacy compatibility.
         type: string
       vac2:
         type: string
@@ -1436,10 +1676,10 @@ definitions:
       vac9:
         type: string
       vacn:
-        description: Brand
+        description: Brand OR tp=2 Leishmania result
         type: string
       vetname:
-        description: Vet member ID
+        description: Vet member ID (numeric string) — empty/0 means owner-added
         type: string
     type: object
 host: localhost:8080
@@ -1745,6 +1985,81 @@ paths:
       summary: Get available time slots
       tags:
       - appointments
+  /auth/change-password:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Current and new password
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.ChangePasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.ChangePasswordResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Change password
+      tags:
+      - auth
+  /auth/email/verify/confirm:
+    get:
+      parameters:
+      - description: Verification token from the email link
+        in: query
+        name: token
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML success page
+          schema:
+            type: string
+        "400":
+          description: HTML error page
+          schema:
+            type: string
+      summary: Confirm email verification
+      tags:
+      - auth
+  /auth/email/verify/send:
+    post:
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/internal_handlers.EmailVerifySendResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "409":
+          description: email already verified
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Send email verification
+      tags:
+      - auth
   /auth/login:
     post:
       consumes:
@@ -1794,6 +2109,40 @@ paths:
       security:
       - BearerAuth: []
       summary: Get current user
+      tags:
+      - auth
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.UpdateMeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.UserResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update current user profile
       tags:
       - auth
   /auth/otp/send:
@@ -2128,6 +2477,32 @@ paths:
       summary: Generate pet access code
       tags:
       - owner
+  /owner/pets/{id}/diseases:
+    get:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.OwnerDiseaseItem'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get pet diseases / allergies (owner view)
+      tags:
+      - owner
   /owner/pets/{id}/procedures:
     get:
       parameters:
@@ -2156,6 +2531,82 @@ paths:
       security:
       - BearerAuth: []
       summary: Get pet procedures (owner view)
+      tags:
+      - owner
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Procedure data
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.OwnerCreateProcedureRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handlers.OwnerProcedureItem'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Owner adds procedure to pet
+      tags:
+      - owner
+  /owner/pets/{id}/procedures/{procId}:
+    delete:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Procedure ID
+        in: path
+        name: procId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MessageResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Owner deletes self-added procedure
       tags:
       - owner
   /owner/visits:
@@ -3365,6 +3816,41 @@ paths:
       summary: Get yearly clinic statistics
       tags:
       - stats
+  /subscriptions/apple-verify:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Apple IAP receipt
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.AppleVerifyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Verify Apple IAP receipt
+      tags:
+      - subscriptions
   /subscriptions/callback:
     post:
       consumes:

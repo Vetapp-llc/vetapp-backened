@@ -7,16 +7,22 @@ import "time"
 type User struct {
 	ID          uint       `gorm:"primaryKey" json:"id"`
 	FirstName   string     `gorm:"column:first_name" json:"first_name"`
-	LastName    string     `gorm:"column:last_name" json:"last_name"`       // Georgian personal ID
+	LastName    string     `gorm:"column:last_name" json:"last_name"` // Georgian personal ID (legacy column reuse)
 	Email       string     `json:"email"`
 	Phone       string     `json:"phone"`
-	Zip         string     `json:"zip"`                                      // Clinic code
-	GroupID     int        `gorm:"column:group_id" json:"group_id"`          // 1=owner, 2=vet, 4=admin
-	Password    []byte     `gorm:"type:bytea" json:"-"`                      // AES encrypted, never exposed in JSON
+	Zip         string     `json:"zip"`                             // Clinic code
+	GroupID     int        `gorm:"column:group_id" json:"group_id"` // 1=owner, 2=vet, 4=admin
+	Password    []byte     `gorm:"type:bytea" json:"-"`             // AES encrypted, never exposed in JSON
 	CompanyName string     `gorm:"column:company_name" json:"company_name"`
 	Address     string     `json:"address"`
+	City        string     `json:"city"`
+	CountryID   int        `gorm:"column:country_id" json:"country_id"`
 	LastLogin   *time.Time `gorm:"column:last_login" json:"last_login"`
 	Status      string     `gorm:"default:T" json:"status"`
+	// Verification flags. Column names use camelCase in the legacy
+	// schema (rare for Postgres) so we explicitly tag them.
+	EmailVerified bool `gorm:"column:emailVerified" json:"email_verified"`
+	PhoneVerified bool `gorm:"column:phoneVerified" json:"phone_verified"`
 }
 
 func (User) TableName() string { return "memberlogin_members" }

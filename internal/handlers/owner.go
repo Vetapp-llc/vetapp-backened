@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"vetapp-backend/internal/middleware"
@@ -60,16 +61,55 @@ type OwnerPetDetail struct {
 
 // OwnerCreatePetRequest is the request body for an owner adding a pet.
 type OwnerCreatePetRequest struct {
-	Name    string `json:"name" validate:"required"`
-	Pet     string `json:"pet"`
-	Sex     string `json:"sex"`
-	Variety string `json:"variety"`
-	Chip    string `json:"chip"`
-	Date    string `json:"date"`
-	Color   string `json:"color"`
+	Name      string `json:"name" validate:"required"`
+	Pet       string `json:"pet"`
+	Sex       string `json:"sex"`
+	Variety   string `json:"variety"`
+	Chip      string `json:"chip"`
+	Date      string `json:"date"`
+	Color     string `json:"color"`
+	PetStatus string `json:"petStatus"` // INHABITANT | ADOPTED | WORKMATE
+}
+
+// OwnerEctoItem is one ectoparasite product on a record. Owner-added
+// records have exactly one item; legacy clinic records may have 1–4
+// (one per slot). The mobile UI renders these as labeled chips.
+//
+// The legacy PHP scheme stores each type in TWO columns:
+//   - drops:  Vac1 (dropdown choice), Vac (custom-typed name)
+//   - pills:  Vac3 (dropdown choice), Vac2 (custom-typed name)
+//   - collar: Vac5 (dropdown choice), Vac4 (custom-typed name)
+//   - spray:  Vac7 (dropdown choice), Vac6 (custom-typed name)
+//
+// On read we pick the custom value when set, else the dropdown value
+// (matches `view11.php:73-89`). New writes from the mobile/Next.js side
+// fill exactly one (choice OR custom) per type.
+type OwnerEctoItem struct {
+	Type string `json:"type" validate:"required"` // "drops" | "pills" | "collar" | "spray"
+	Name string `json:"name" validate:"required"` // brand / preparat name
+}
+
+// OwnerTestResult is one row of a diagnostic test panel. Each `tp=2/22/222`
+// (dog/cat/other test) record carries up to 16 of these, depending on
+// which panels were run.
+type OwnerTestResult struct {
+	Label  string `json:"label" validate:"required"`  // human-readable test name (Georgian)
+	Result string `json:"result" validate:"required"` // typically "დადებითი" / "უარყოფითი" but can be free text
 }
 
 // OwnerProcedureItem is a medical record as seen by the owner.
+//
+// `VaccineType` / `Preparat` come from the legacy `vac` and `vacn`
+// columns. `Serial` is the vaccine batch number (legacy `ser` column).
+// `VetFullName` is the vet's full name resolved from
+// `memberlogin_members`; populated only when `vetname` is a numeric
+// user_id that matches a member row.
+//
+// `AddedByOwner` is `true` when the record was self-reported from the
+// mobile app (no clinic context: `sk` column is empty). This is the
+// signal the UI uses for the "added by owner" badge and the delete
+// affordance — independent of `VetName`, so owners can self-report the
+// name of an external vet without losing those guarantees.
 type OwnerProcedureItem struct {
 	ID            string   `json:"id" validate:"required"`
 	Date          *string  `json:"date"`
@@ -79,13 +119,32 @@ type OwnerProcedureItem struct {
 	Diagnosis     string   `json:"diagnosis" validate:"required"`
 	Notes         string   `json:"notes" validate:"required"`
 	Comment       string   `json:"comment" validate:"required"`
-	VetName       string   `json:"vetName" validate:"required"`
-	Vaccinations  []string `json:"vaccinations" validate:"required"`
+	Anamnesis     string            `json:"anamnesis"`                   // tp=10x/20x — anamnesis. tp=1/2 — also surfaced if set.
+	Prescription  string            `json:"prescription"`                // dani column — prescription / დანიშნულება. Shown on every category.
+	VetName       string            `json:"vetName" validate:"required"` // raw column value (id or free-text)
+	VetFullName   string            `json:"vetFullName"`                 // resolved "First Last" via JOIN
+	VaccineType   string            `json:"vaccineType"`                 // tp=1 — vaccine type ("კომპლექსური ვაქცინა")
+	Preparat      string            `json:"preparat"`                    // tp=1 — vaccine brand. tp=12 — dewormer drug.
+	Serial        string            `json:"serial"`                      // tp=1 — batch / serial number
+	Treatment     string            `json:"treatment"`                   // tp=10x/20x — treatment / medications administered
+	AddedByOwner  bool              `json:"addedByOwner"`                // true => self-reported, deletable
+	EctoItems     []OwnerEctoItem   `json:"ectoItems"`                   // populated only for tp=11 records
+	TestResults   []OwnerTestResult `json:"testResults"`                 // populated only for tp=2/22/222 records
+	Vaccinations  []string          `json:"vaccinations" validate:"required"`
 }
 
 // AccessCodeResponse is the response when generating a new access code.
 type AccessCodeResponse struct {
 	Code string `json:"code" validate:"required"`
+}
+
+// OwnerDiseaseItem is one entry from the `eals` (allergy/disease) table
+// as exposed to the owner. Lives in its own table separate from
+// `vaccination` — see Allergy model.
+type OwnerDiseaseItem struct {
+	ID   string  `json:"id" validate:"required"`
+	Name string  `json:"name" validate:"required"`
+	Date *string `json:"date"`
 }
 
 // CalendarItem is an upcoming procedure grouped by date.
@@ -288,6 +347,18 @@ func (h *OwnerPortalHandler) CreatePet(w http.ResponseWriter, r *http.Request) {
 	var user models.User
 	h.db.First(&user, claims.UserID)
 
+	// Default to INHABITANT if unspecified or invalid so home-screen
+	// filters always have a bucket for every pet. STREET is a 2026
+	// addition for stray / community-fed pets that owners adopted
+	// informally without bringing them indoors.
+	petStatus := req.PetStatus
+	switch petStatus {
+	case "INHABITANT", "ADOPTED", "WORKMATE", "STREET":
+		// ok
+	default:
+		petStatus = "INHABITANT"
+	}
+
 	pet := models.Pet{
 		UUID:      claims.LastName, // Owner personal ID
 		Name:      req.Name,
@@ -297,10 +368,11 @@ func (h *OwnerPortalHandler) CreatePet(w http.ResponseWriter, r *http.Request) {
 		Chip:      req.Chip,
 		Date:      req.Date,
 		Color:     req.Color,
+		PetStatus: petStatus,
 		Phone:     user.Phone,
 		Email:     user.Email,
 		FirstName: user.FirstName,
-		Status:    3,    // Unregistered
+		Status:    3,      // Unregistered
 		Code:      "1313", // Default code
 	}
 
@@ -379,7 +451,9 @@ func (h *OwnerPortalHandler) Procedures(w http.ResponseWriter, r *http.Request) 
 
 	tpStr := r.URL.Query().Get("tp")
 
-	// tp=999 means query allergies table instead
+	// tp=999 means query allergies table instead. Kept for back-compat
+	// with older mobile builds; new builds should hit the dedicated
+	// `GET /api/owner/pets/{id}/diseases` endpoint.
 	if tpStr == "999" {
 		var allergies []models.Allergy
 		h.db.Where("uuid = ?", id).Order("id DESC").Find(&allergies)
@@ -403,39 +477,277 @@ func (h *OwnerPortalHandler) Procedures(w http.ResponseWriter, r *http.Request) 
 
 	query := h.db.Where("uuid = ?", id)
 	if tpStr != "" {
-		query = query.Where("tp = ?", tpStr)
+		// Test category is species-split in the legacy PHP scheme:
+		//   tp=2   → dog test    (vet/addtest.php)
+		//   tp=22  → cat test    (vet/addtest1.php)
+		//   tp=222 → other test  (vet/addtest2.php)
+		// Expose a single "ანალიზი" tile in the UI by translating tp=2
+		// into a 3-tp `IN` filter on the server side, so callers don't
+		// have to know the species split.
+		if tpStr == "2" {
+			query = query.Where("tp IN ?", []string{"2", "22", "222"})
+		} else {
+			query = query.Where("tp = ?", tpStr)
+		}
 	}
 
 	var procs []models.Procedure
 	query.Order("date DESC, id DESC").Find(&procs)
 
-	items := make([]OwnerProcedureItem, len(procs))
-	for i, p := range procs {
-		item := OwnerProcedureItem{
-			ID:            strconv.Itoa(int(p.ID)),
-			ProcedureType: strconv.Itoa(p.TP),
-			ProcedureName: p.TPName,
-			Diagnosis:     p.Diagn,
-			Notes:         p.Nout,
-			Comment:       p.Coment, // Visible comment (not internal koment)
-			VetName:       p.VetName,
+	// Bulk-resolve vet names: collect unique numeric vetname values, look
+	// them up once, and feed the lookup into the loop below. Avoids one
+	// query per record.
+	//
+	// Schema notes:
+	//   - `vaccination.vetname` is TEXT and frequently has trailing
+	//     whitespace (e.g. "149  ") from the legacy MySQL import.
+	//     We trim before using it as a key.
+	//   - In `memberlogin_members`, the `first_name` column contains the
+	//     full human-readable name (often "First Last" already), while
+	//     `last_name` is actually the Georgian personal ID — see
+	//     models/user.go. So display from `first_name` only.
+	vetIDSet := make(map[string]struct{})
+	for _, p := range procs {
+		key := strings.TrimSpace(p.VetName)
+		if key != "" && key != "0" {
+			vetIDSet[key] = struct{}{}
 		}
-		if p.Date != "" {
-			item.Date = &p.Date
+	}
+	vetNames := make(map[string]string, len(vetIDSet))
+	if len(vetIDSet) > 0 {
+		ids := make([]string, 0, len(vetIDSet))
+		for id := range vetIDSet {
+			ids = append(ids, id)
 		}
-		if p.Date2 != "" {
-			item.NextDate = &p.Date2
+		type vetRow struct {
+			ID        string
+			FirstName string
 		}
-		// Collect vaccinations
-		for _, v := range []string{p.Vac, p.Vac1, p.Vac2, p.Vac3, p.Vac4, p.Vac5, p.Vac6, p.Vac7, p.Vac8, p.Vac9} {
-			if v != "" {
-				item.Vaccinations = append(item.Vaccinations, v)
+		var vets []vetRow
+		h.db.Table("memberlogin_members").
+			Select("id::text AS id, first_name").
+			Where("id::text IN ?", ids).
+			Scan(&vets)
+		for _, v := range vets {
+			full := strings.TrimSpace(v.FirstName)
+			if full != "" {
+				vetNames[v.ID] = full
 			}
 		}
-		if item.Vaccinations == nil {
-			item.Vaccinations = []string{}
+	}
+
+	items := make([]OwnerProcedureItem, len(procs))
+	for i, p := range procs {
+		items[i] = buildOwnerProcedureItem(&p, vetNames)
+	}
+
+	writeJSON(w, http.StatusOK, items)
+}
+
+// buildOwnerProcedureItem turns a Procedure DB row into an API response
+// item, dispatching on `TP` to interpret the polymorphic columns
+// correctly. Centralising this here means the GET list handler and the
+// POST 201 response (CreateProcedure) can share the same logic.
+//
+// All multi-line text fields run through `cleanText()` on the way out
+// so legacy `<br />` tags (from PHP's `nl2br()` on save) become real
+// newlines.
+//
+// `tpname` is normalized to the canonical Georgian label when the raw
+// DB value is missing, looks numeric, or doesn't match our category
+// table. Legacy records often have `tpname="1"` or stale variant
+// strings; this gives the UI a stable header line.
+func buildOwnerProcedureItem(p *models.Procedure, vetNames map[string]string) OwnerProcedureItem {
+	vetKey := strings.TrimSpace(p.VetName)
+	// Owner-added if there's no associated vet (vetname empty / "0").
+	addedByOwner := vetKey == "" || vetKey == "0"
+
+	procedureName := normalizeTPName(p.TP, p.TPName)
+
+	item := OwnerProcedureItem{
+		ID:            strconv.Itoa(int(p.ID)),
+		ProcedureType: strconv.Itoa(p.TP),
+		ProcedureName: procedureName,
+		Comment:       cleanText(p.Coment),
+		Prescription:  cleanText(p.Dani),
+		VetName:       vetKey,
+		VetFullName:   vetNames[vetKey],
+		AddedByOwner:  addedByOwner,
+	}
+	if p.Date != "" {
+		item.Date = &p.Date
+	}
+	if p.Date2 != "" {
+		item.NextDate = &p.Date2
+	}
+
+	// Per-tp column interpretation. See models/procedure.go for the full
+	// schema-overload story.
+	switch {
+	case p.TP == 1: // Vaccination
+		item.VaccineType = cleanText(p.Vac)
+		item.Preparat = cleanText(p.VacN)
+		item.Serial = cleanText(p.Ser)
+		// Diagnosis/notes still surface in case the legacy clinic UI
+		// stamped them on the same record.
+		item.Diagnosis = cleanText(p.Diagn)
+		item.Notes = cleanText(p.Nout)
+
+	case p.TP == 11: // Ectoparasite — 8-slot custom/choice convention
+		item.EctoItems = extractEctoItems(p)
+
+	case p.TP == 12: // Dehelminization
+		// PHP form (vet/adddeh.php) puts the dropdown drug choice in
+		// `Deh` and falls back to `Vac` for free-typed custom names.
+		if v := strings.TrimSpace(p.Deh); v != "" {
+			item.Preparat = cleanText(v)
+		} else {
+			item.Preparat = cleanText(p.Vac)
 		}
-		items[i] = item
+
+	case isTestTP(p.TP): // 2/22/222 — diagnostic test panels
+		item.TestResults = extractTestResults(p)
+		item.Diagnosis = cleanText(p.Diagn)
+		item.Notes = cleanText(p.Nout)
+
+	case isGenericProcedureTP(p.TP):
+		// Generic sub-specialty (surgery, radiology, therapy, ...). The
+		// PHP `addprocedure*.php` family uses these column meanings:
+		//   Vac  = procedure name (per-record, can override category label)
+		//   Vac1 = anamnesis
+		//   Vac2 = diagnosis
+		//   Vac3 = treatment / medications
+		// Anam/Diagn/Nout columns are sometimes also stamped — prefer
+		// the Vac1/Vac2/Vac3 values since that's where the form writes.
+		//
+		// Per partner spec, the procedure name in the owner UI is the
+		// per-record editable name. If `Vac` was set on this record
+		// (clinic typed a custom name, or owner renamed via the new
+		// edit affordance), surface that as procedureName; otherwise
+		// the canonical category label from `procedureTypeNames` wins
+		// (already set above via normalizeTPName).
+		if vacName := strings.TrimSpace(p.Vac); vacName != "" {
+			item.ProcedureName = cleanText(vacName)
+		}
+		item.Anamnesis = cleanText(firstNonEmpty(p.Vac1, p.Anam))
+		item.Diagnosis = cleanText(firstNonEmpty(p.Vac2, p.Diagn))
+		item.Treatment = cleanText(firstNonEmpty(p.Vac3, p.Nout))
+		// Notes column kept as a separate slot in case it's set
+		// independently of `Vac3`/`Nout` already being shown as treatment.
+		item.Notes = cleanText(p.Nout)
+
+	default:
+		// Unknown tp — emit raw fields without interpretation so users
+		// don't lose data. Legacy orphan tps (3/4/5/555) hit this path
+		// until they're migrated.
+		item.VaccineType = cleanText(p.Vac)
+		item.Preparat = cleanText(p.VacN)
+		item.Diagnosis = cleanText(p.Diagn)
+		item.Notes = cleanText(p.Nout)
+	}
+
+	// Vaccinations array kept as a flat list for back-compat with old
+	// mobile builds that don't yet know about ectoItems / testResults.
+	for _, v := range []string{p.Vac, p.Vac1, p.Vac2, p.Vac3, p.Vac4, p.Vac5, p.Vac6, p.Vac7, p.Vac8, p.Vac9} {
+		if v != "" {
+			item.Vaccinations = append(item.Vaccinations, cleanText(v))
+		}
+	}
+	if item.Vaccinations == nil {
+		item.Vaccinations = []string{}
+	}
+
+	return item
+}
+
+// firstNonEmpty returns the first non-blank (after trim) string from
+// the given options. Used to choose between primary and fallback DB
+// columns for generic-procedure fields.
+func firstNonEmpty(opts ...string) string {
+	for _, s := range opts {
+		if strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// normalizeTPName picks the procedure's display name. It prefers the
+// canonical Georgian label from `procedureTypeNames` for the given tp
+// and only falls back to the raw `tpname` column when the canonical
+// label is unavailable AND the raw value looks like a real label (not
+// a leftover numeric string).
+//
+// Many legacy rows have `tpname="1"` or `tpname=""` because PHP forms
+// occasionally wrote the tp number into the name field by mistake.
+// Without this normalization, the mobile accordion header reads "1"
+// instead of "ვაქცინაცია".
+func normalizeTPName(tp int, raw string) string {
+	if canonical, ok := procedureTypeNames[tp]; ok {
+		return canonical
+	}
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	// Looks like a bare number ("1", "11", "107"…) — almost certainly
+	// the tp got accidentally written into tpname. Hide it.
+	if onlyDigits(trimmed) {
+		return ""
+	}
+	return trimmed
+}
+
+// onlyDigits reports whether s is entirely ASCII digits 0-9. Cheaper
+// than a regex for the short strings we handle here.
+func onlyDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+
+
+// Diseases returns the pet's allergies / chronic diseases from the
+// `eals` table (separate from the procedure history). The legacy app
+// stores these in their own table because they're conditions, not
+// dated procedures.
+// @Summary Get pet diseases / allergies (owner view)
+// @Tags owner
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Pet ID"
+// @Success 200 {array} OwnerDiseaseItem
+// @Failure 404 {object} ErrorResponse
+// @Router /owner/pets/{id}/diseases [get]
+func (h *OwnerPortalHandler) Diseases(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	personalID := ownerPersonalID(r)
+
+	if _, err := h.verifyPetOwnership(id, personalID); err != nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
+		return
+	}
+
+	var allergies []models.Allergy
+	h.db.Where("uuid = ?", id).Order("id DESC").Find(&allergies)
+
+	items := make([]OwnerDiseaseItem, len(allergies))
+	for i, a := range allergies {
+		items[i] = OwnerDiseaseItem{
+			ID:   strconv.Itoa(int(a.ID)),
+			Name: cleanText(a.Name),
+		}
+		if a.Date != "" {
+			d := a.Date
+			items[i].Date = &d
+		}
 	}
 
 	writeJSON(w, http.StatusOK, items)
@@ -521,6 +833,354 @@ func (h *OwnerPortalHandler) Calendar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, items)
+}
+
+// procedureNameForTP returns the canonical Georgian procedure name for a
+// given numeric `tp` code. The mapping mirrors the legacy PHP scheme,
+// which is also what `ProcedureHandler.Types()` returns and what
+// `procedureTypeNames` (in public.go) holds.
+//
+// Used to auto-populate `tpname` on owner-created records — without
+// this, records render as raw numeric codes in the history list.
+func procedureNameForTP(tp int) string {
+	if name, ok := procedureTypeNames[tp]; ok {
+		return name
+	}
+	return ""
+}
+
+// extractEctoItems decodes an ectoparasite (`tp=11`) record's 8 product
+// slots into a list of `{type, name}` pairs. The PHP scheme stores each
+// product type in two columns: a "choice" column (dropdown selection)
+// and a "custom" column (free-typed name). The custom value wins if
+// both are set, matching `view11.php:73-89`.
+//
+// Bug compensation: `addecto.php:459` has a known typo that writes the
+// collar-custom value (`$vac4`) into the `vac6` column. So when both
+// `Vac4` and `Vac6` are non-empty AND identical, treat `Vac6` as a
+// duplicate and skip the spurious spray slot. This affects ~10s of
+// legacy records.
+func extractEctoItems(p *models.Procedure) []OwnerEctoItem {
+	corruptVac6 := strings.TrimSpace(p.Vac4) != "" &&
+		strings.TrimSpace(p.Vac4) == strings.TrimSpace(p.Vac6)
+
+	type slot struct {
+		typ           string
+		choice        string
+		custom        string
+		skipDuplicate bool // for the vac6/vac4 PHP-bug case
+	}
+	slots := []slot{
+		{typ: "drops", choice: p.Vac1, custom: p.Vac},
+		{typ: "pills", choice: p.Vac3, custom: p.Vac2},
+		{typ: "collar", choice: p.Vac5, custom: p.Vac4},
+		{typ: "spray", choice: p.Vac7, custom: p.Vac6, skipDuplicate: corruptVac6},
+	}
+
+	var items []OwnerEctoItem
+	for _, s := range slots {
+		if s.skipDuplicate {
+			// Spray slot: vac6 is a corrupt copy of vac4, ignore it.
+			// Still surface the dropdown choice if one exists.
+			if v := strings.TrimSpace(s.choice); v != "" {
+				items = append(items, OwnerEctoItem{Type: s.typ, Name: v})
+			}
+			continue
+		}
+		// Custom-typed value preferred; falls back to dropdown choice.
+		name := strings.TrimSpace(s.custom)
+		if name == "" {
+			name = strings.TrimSpace(s.choice)
+		}
+		if name != "" {
+			items = append(items, OwnerEctoItem{Type: s.typ, Name: name})
+		}
+	}
+	return items
+}
+
+// extractTestResults decodes a test record's panel results into labeled
+// rows. Test panels differ by species (`tp=2` dog, `tp=22` cat,
+// `tp=222` other) — each species' PHP form uses different columns for
+// different antigens. The dog panel layout below mirrors
+// `vet/addtest.php`. Cat / other variants don't have published label
+// tables yet; we fall back to generic "Test 1", "Test 2", … labels for
+// any non-empty column on those tps.
+func extractTestResults(p *models.Procedure) []OwnerTestResult {
+	type slot struct {
+		label string
+		value string
+	}
+	var slots []slot
+
+	switch p.TP {
+	case 2: // dog test — vet/addtest.php
+		slots = []slot{
+			{"Leishmania", p.VacN},
+			{"Canine Babesia", p.Deh},
+			{"GiarDia duodenalis", p.Vac1},
+			{"Canine distemper", p.Vac2},
+			{"Caniv4 — Heartworm", p.Vac3},
+			{"Caniv4 — Lyme", p.Vac4},
+			{"Caniv4 — Anaplasma", p.Vac5},
+			{"Caniv4 — E.Canis", p.Vac6},
+			{"Caniv 4DX — Ehrlichia", p.Test1},
+			{"Caniv 4DX — Babesia", p.Test2},
+			{"Caniv 4DX — Anaplasma", p.Test3},
+			{"Caniv 4DX — Heartworm", p.Test4},
+			{"CDV/CAV — CDV Ag", p.Test5},
+			{"CDV/CAV — ACAV-II Ag", p.Test6},
+			{"cCRP Ag", p.Test7},
+			{"RLN Test", p.Test8},
+		}
+	case 22, 222: // cat / other — fallback to generic labels until panels are mapped
+		slots = []slot{
+			{"Test 1", p.VacN},
+			{"Test 2", p.Deh},
+			{"Test 3", p.Vac1},
+			{"Test 4", p.Vac2},
+			{"Test 5", p.Vac3},
+			{"Test 6", p.Vac4},
+			{"Test 7", p.Vac5},
+			{"Test 8", p.Vac6},
+		}
+	default:
+		return nil
+	}
+
+	var items []OwnerTestResult
+	for _, s := range slots {
+		v := strings.TrimSpace(s.value)
+		if v == "" {
+			continue
+		}
+		items = append(items, OwnerTestResult{Label: s.label, Result: v})
+	}
+	return items
+}
+
+// isGenericProcedureTP reports whether the given tp uses the "generic
+// procedure" column convention: vac=name, vac1=anamnesis, vac2=diagnosis,
+// vac3=treatment. These are the sub-specialty tps written by
+// vet/addprocedure*.php.
+func isGenericProcedureTP(tp int) bool {
+	switch tp {
+	case 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 115, 116, 202, 203:
+		return true
+	}
+	return false
+}
+
+// isTestTP reports whether the tp is one of the species-split test types.
+func isTestTP(tp int) bool {
+	return tp == 2 || tp == 22 || tp == 222
+}
+
+// OwnerCreateProcedureRequest is the payload for an owner self-reporting a
+// procedure (home vaccination, deworming, ectoparasite treatment, test, etc.)
+// against their own pet. Clinic-only fields (sk, vetname, price) are not
+// exposed; the pet is identified by the URL path, not the body. Records
+// created via this endpoint are marked "added by owner" and don't show a
+// vet name in the history — see the AddedByOwner field on
+// OwnerProcedureItem.
+type OwnerCreateProcedureRequest struct {
+	TP     int    `json:"tp" validate:"required,min=1"`
+	Date   string `json:"date"`
+	Date2  string `json:"date2"`
+	Date3  string `json:"date3"`
+	TPName string `json:"tpname"`
+	Vac    string `json:"vac"`
+	VacN   string `json:"vacn"`
+	Ser    string `json:"ser"`
+	Deh    string `json:"deh"`
+	Diagn  string `json:"diagn"`
+	Nout   string `json:"nout"`
+	Anam   string `json:"anam"`
+	Coment string `json:"coment"`
+	Dani   string `json:"dani"`
+	Vac1   string `json:"vac1"`
+	Vac2   string `json:"vac2"`
+	Vac3   string `json:"vac3"`
+	Vac4   string `json:"vac4"`
+	Vac5   string `json:"vac5"`
+	Vac6   string `json:"vac6"`
+	Vac7   string `json:"vac7"`
+	Vac8   string `json:"vac8"`
+	Vac9   string `json:"vac9"`
+}
+
+// ownerWriteAllowedTPs lists the procedure categories an owner is
+// allowed to self-record from the mobile app. Per partner spec
+// (item 7 from the 2026-04-28 review), owners can record records in
+// every category — the form is just dramatically simpler than the
+// clinic side: editable name, diagnosis, prescription, comment.
+//
+// Tests are still clinic-only because they require a panel of column
+// values that the simplified form doesn't expose, and would otherwise
+// produce empty test panels in history.
+//
+// Mirrors the `OWNER_WRITE_ALLOWED_NAMES` set in the mobile app —
+// both sides must agree.
+var ownerWriteAllowedTPs = map[int]bool{
+	1:   true, // vaccination
+	11:  true, // ectoparasite
+	12:  true, // dehelminization
+	101: true, // stomatology
+	102: true, // cardiology
+	103: true, // oxygen therapy
+	104: true, // traumatology
+	105: true, // dermatology
+	106: true, // surgery
+	107: true, // other
+	108: true, // consultation
+	109: true, // radiology
+	110: true, // sterilization
+	115: true, // microchip
+	116: true, // laboratory
+	202: true, // therapy
+	203: true, // ophthalmology
+	// 2 / 22 / 222 (test) excluded — those need a structured panel.
+}
+
+// CreateProcedure adds a medical record to one of the owner's pets.
+// Owner-created records have empty `vetname`/`sk` and their `owner` field is
+// set to the owner's personal ID — this is what `DeleteProcedure` uses to
+// decide whether the owner is allowed to remove the record.
+// @Summary Owner adds procedure to pet
+// @Tags owner
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Pet ID"
+// @Param body body OwnerCreateProcedureRequest true "Procedure data"
+// @Success 201 {object} OwnerProcedureItem
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /owner/pets/{id}/procedures [post]
+func (h *OwnerPortalHandler) CreateProcedure(w http.ResponseWriter, r *http.Request) {
+	petID := chi.URLParam(r, "id")
+	personalID := ownerPersonalID(r)
+
+	pet, err := h.verifyPetOwnership(petID, personalID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
+		return
+	}
+
+	var req OwnerCreateProcedureRequest
+	if err := decodeAndValidate(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	// Owners can self-record only a small subset of categories (home
+	// boosters, ecto/dehel treatments). Anything else is clinic-only —
+	// reject so a buggy/older mobile client can't bypass the UI gate.
+	if !ownerWriteAllowedTPs[req.TP] {
+		writeJSON(w, http.StatusForbidden, ErrorResponse{
+			Error: "owners can only add vaccination, ectoparasite, or dehelminization records",
+		})
+		return
+	}
+
+	// Auto-populate the human-readable procedure name when the client
+	// didn't send one. Without this, owner-added records show up as raw
+	// numeric tp ("1", "3", …) in the history list.
+	tpName := req.TPName
+	if tpName == "" {
+		tpName = procedureNameForTP(req.TP)
+	}
+
+	proc := models.Procedure{
+		UUID:   petID,
+		TP:     req.TP,
+		Date:   req.Date,
+		Date2:  req.Date2,
+		Date3:  req.Date3,
+		TPName: tpName,
+		Vac:    req.Vac,
+		VacN:   req.VacN,
+		Ser:    req.Ser,
+		Deh:    req.Deh,
+		Diagn:  req.Diagn,
+		Nout:   req.Nout,
+		Anam:   req.Anam,
+		Coment: req.Coment,
+		Dani:   req.Dani,
+		Vac1:   req.Vac1,
+		Vac2:   req.Vac2,
+		Vac3:   req.Vac3,
+		Vac4:   req.Vac4,
+		Vac5:   req.Vac5,
+		Vac6:   req.Vac6,
+		Vac7:   req.Vac7,
+		Vac8:   req.Vac8,
+		Vac9:   req.Vac9,
+		PName:  pet.Name,
+		Owner:  personalID,
+		// VetName + SK intentionally empty — this is what marks the
+		// record as owner-created (used by DeleteProcedure auth and by
+		// the mobile accordion's badge / delete affordance).
+		Phone: "0", // unpaid — owner records don't go through clinic billing
+	}
+
+	if err := h.db.Create(&proc).Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to create procedure"})
+		return
+	}
+
+	// Build the response the same way the list endpoint does so the
+	// shape stays identical between create-201 and the next GET refresh.
+	// Pass an empty vetNames map — the owner-created record has no
+	// numeric vetname to resolve.
+	item := buildOwnerProcedureItem(&proc, map[string]string{})
+	writeJSON(w, http.StatusCreated, item)
+}
+
+// DeleteProcedure removes an owner-created medical record from the pet.
+// Records created by a vet (non-empty `vetname`) cannot be deleted by the
+// owner — returns 403 in that case.
+// @Summary Owner deletes self-added procedure
+// @Tags owner
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Pet ID"
+// @Param procId path int true "Procedure ID"
+// @Success 200 {object} MessageResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /owner/pets/{id}/procedures/{procId} [delete]
+func (h *OwnerPortalHandler) DeleteProcedure(w http.ResponseWriter, r *http.Request) {
+	petID := chi.URLParam(r, "id")
+	procID := chi.URLParam(r, "procId")
+	personalID := ownerPersonalID(r)
+
+	if _, err := h.verifyPetOwnership(petID, personalID); err != nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
+		return
+	}
+
+	var proc models.Procedure
+	if err := h.db.Where("id = ? AND uuid = ?", procID, petID).First(&proc).Error; err != nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "procedure not found"})
+		return
+	}
+
+	// Owners may only delete records they themselves created. Vet-entered
+	// records have a non-empty vetname and are read-only from the owner app.
+	if proc.VetName != "" {
+		writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "cannot delete clinic-entered record"})
+		return
+	}
+
+	if err := h.db.Delete(&proc).Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to delete procedure"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, MessageResponse{Message: "procedure deleted"})
 }
 
 // Visits returns the owner's upcoming appointments.

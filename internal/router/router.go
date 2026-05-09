@@ -18,7 +18,15 @@ import (
 )
 
 // Setup creates and configures the Chi router with all routes.
-func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.SMSService, ipayService *services.IPayService, baseURL string) *chi.Mux {
+//
+// `emailService` may be a service whose .Enabled() reports false (no
+// RESEND_API_KEY configured) — in that case email-verification calls
+// gracefully degrade to a "pending" response rather than 5xx.
+//
+// `emailVerifyBaseURL` is the absolute URL prefix the email-verification
+// link in outgoing emails points back to. Pass cfg.EmailVerifyBaseURL
+// or fall back to baseURL when empty.
+func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.SMSService, emailService *services.EmailService, ipayService *services.IPayService, baseURL, emailVerifyBaseURL string) *chi.Mux {
 	r := chi.NewRouter()
 
 	// --- Global middleware ---
@@ -36,7 +44,14 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 	}))
 
 	// --- Initialize handlers ---
-	authHandler := handlers.NewAuthHandler(db, authService, smsService)
+	// Resolve the public URL the email-verification link points to:
+	// EMAIL_VERIFY_BASE_URL takes precedence so a deployment behind a
+	// reverse proxy can advertise a different host than BASE_URL.
+	publicEmailURL := emailVerifyBaseURL
+	if publicEmailURL == "" {
+		publicEmailURL = baseURL
+	}
+	authHandler := handlers.NewAuthHandler(db, authService, smsService, emailService, publicEmailURL)
 	petHandler := handlers.NewPetHandler(db)
 	procHandler := handlers.NewProcedureHandler(db)
 	ownerHandler := handlers.NewOwnerHandler(db)
@@ -68,6 +83,12 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 		r.Post("/otp/send", authHandler.OTPSend)
 		r.Post("/otp/verify", authHandler.OTPVerify)
 		r.Post("/password-reset", authHandler.PasswordReset)
+		// Email-verification CONFIRMATION is reached by clicking a link
+		// in an email — there's no JWT to attach. Token in the query
+		// string is the proof of identity. Renders an HTML page on
+		// success/failure rather than JSON so the user sees something
+		// readable directly in their browser.
+		r.Get("/email/verify/confirm", authHandler.ConfirmEmailVerification)
 	})
 
 	// Subscription packages (public), callback (public webhook)
@@ -85,6 +106,12 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 
 		// Auth - authenticated
 		r.Get("/auth/me", authHandler.Me)
+		r.Put("/auth/me", authHandler.UpdateMe)
+		// In-app password rotation (settings → security → change password).
+		// Distinct from the public /auth/password-reset, which is the
+		// "I forgot my password" OTP recovery flow.
+		r.Post("/auth/change-password", authHandler.ChangePassword)
+		r.Post("/auth/email/verify/send", authHandler.SendEmailVerification)
 
 		// Pets - vet/admin only
 		r.Route("/pets", func(r chi.Router) {
@@ -105,16 +132,21 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 			r.Get("/{personalId}", ownerHandler.Get)
 		})
 
-		// Procedures - vet/admin only
+		// Procedure reference data — constant lookup lists (vaccine
+		// brands, dewormer drugs, ectoparasite products, test panels).
+		// Authenticated but no role gate, so the owner mobile app can
+		// populate its dropdowns when self-recording procedures.
+		r.Get("/procedures/types", procHandler.Types)
+		r.Get("/procedures/vaccine-options", procHandler.VaccineOptions)
+		r.Get("/procedures/test-options", procHandler.TestOptions)
+		r.Get("/procedures/dehel-options", procHandler.DehelOptions)
+		r.Get("/procedures/ecto-options", procHandler.EctoOptions)
+
+		// Procedures - vet/admin only (writes + clinic register)
 		r.Route("/procedures", func(r chi.Router) {
 			r.Use(middleware.RequireRole(models.RoleVet, models.RoleAdmin))
 			r.Get("/", procHandler.List)
 			r.Post("/", procHandler.Create)
-			r.Get("/types", procHandler.Types)
-			r.Get("/vaccine-options", procHandler.VaccineOptions)
-			r.Get("/test-options", procHandler.TestOptions)
-			r.Get("/dehel-options", procHandler.DehelOptions)
-			r.Get("/ecto-options", procHandler.EctoOptions)
 			r.Get("/{id}", procHandler.Get)
 			r.Put("/{id}", procHandler.Update)
 			r.Delete("/{id}", procHandler.Delete)
@@ -210,6 +242,13 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 			r.Get("/pets/{id}", ownerPortalHandler.GetPet)
 			r.Put("/pets/{id}", ownerPortalHandler.UpdatePet)
 			r.Get("/pets/{id}/procedures", ownerPortalHandler.Procedures)
+			r.Post("/pets/{id}/procedures", ownerPortalHandler.CreateProcedure)
+			r.Delete("/pets/{id}/procedures/{procId}", ownerPortalHandler.DeleteProcedure)
+			// Diseases / allergies live in the separate `eals` table, not
+			// in the `vaccination` table — exposed via its own endpoint
+			// so the mobile app doesn't have to encode the legacy
+			// "tp=999 means allergies" hack.
+			r.Get("/pets/{id}/diseases", ownerPortalHandler.Diseases)
 			r.Get("/pets/{id}/code", ownerPortalHandler.GenerateCode)
 			r.Get("/calendar", ownerPortalHandler.Calendar)
 			r.Get("/visits", ownerPortalHandler.Visits)

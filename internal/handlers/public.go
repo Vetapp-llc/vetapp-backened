@@ -48,25 +48,34 @@ type PublicPetResponse struct {
 	Categories []ProcedureCategoryCount `json:"categories"`
 }
 
-// procedureTypeNames maps TP codes to display names.
+// procedureTypeNames maps TP codes to canonical Georgian display names.
+//
+// This mapping must mirror the legacy PHP app's scheme — see
+// `ProcedureHandler.Types()` for the source-of-truth comment block. Any
+// new tp added here must also be added in `procedureNameForTP` (used for
+// auto-populating `tpname` on owner-created records) and in the mobile
+// app's `CATEGORY_TP` constant.
 var procedureTypeNames = map[int]string{
 	1:   "ვაქცინაცია",
-	101: "ცოფის ვაქცინა",
-	2:   "ანალიზი",
-	3:   "დეჰელმინთიზაცია",
-	4:   "ექტოპარაზიტი",
-	5:   "ქირურგია",
-	6:   "სტომატოლოგია",
-	7:   "რენტგენი",
-	8:   "ულტრაბგერა",
-	9:   "ელექტროკარდიოგრამა",
-	10:  "ენდოსკოპია",
-	100: "სტერილიზაცია",
-	102: "ჩიპირება",
-	103: "ევთანაზია",
-	104: "ლაბორატორია",
+	2:   "ანალიზი (ძაღლი)",
+	22:  "ანალიზი (კატა)",
+	222: "ანალიზი (სხვა)",
+	11:  "ექტოპარაზიტების პრევენცია",
+	12:  "დეჰელმინთიზაცია",
+	101: "სტომატოლოგია",
+	102: "კარდიოლოგია",
+	103: "ოქსიგენოთერაპია",
+	104: "ტრავმატოლოგია",
+	105: "დერმატოლოგია",
+	106: "ქირურგია",
+	107: "სხვა პროცედურა",
 	108: "კონსულტაცია",
-	109: "მანიპულაცია",
+	109: "რადიოლოგია",
+	110: "სტერილიზაცია/კასტრაცია",
+	115: "მიკროჩიპი",
+	116: "ლაბორატორია",
+	202: "თერაპია",
+	203: "ოფთალმოლოგია",
 }
 
 // GetPet returns public pet info and procedure category counts.

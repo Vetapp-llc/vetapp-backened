@@ -302,6 +302,25 @@ func (h *ProcedureHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // Types returns all procedure type codes and names.
+//
+// IMPORTANT: this list mirrors the legacy PHP app's tp scheme exactly,
+// because production data has been written by PHP for years and the new
+// app must read/write into the same buckets. See the per-tp PHP file
+// references in the comments below; if you change a number you'll silently
+// orphan records.
+//
+//	tp=1            Vaccination          (vet/addvac.php)
+//	tp=2,22,222     Test (dog/cat/other) (vet/addtest.php / addtest1.php / addtest2.php)
+//	tp=11           Ectoparasite         (vet/addecto.php) — NOT 4
+//	tp=12           Dehelminization      (vet/adddeh.php) — NOT 3
+//	tp=101..109,202,203  Sub-specialties (vet/addprocedure.php?tp=…)
+//	tp=110          Sterilization        (vet/addprocedure3.php) + side `steril` table
+//	tp=115          Microchip            (vet/addprocedure4.php)
+//	tp=116          Laboratory           (vet/addprocedure5/6.php)
+//
+// tp values 3, 4, 5, 555 are legacy orphans — no PHP code emits them; data
+// will be migrated to canonical tps in a one-shot SQL pass.
+//
 // @Summary List procedure types
 // @Tags procedures
 // @Produce json
@@ -310,23 +329,26 @@ func (h *ProcedureHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // @Router /procedures/types [get]
 func (h *ProcedureHandler) Types(w http.ResponseWriter, r *http.Request) {
 	types := []ProcedureTypeItem{
-		{TP: 1, Name: "ვაქცინაცია (Vaccination)"},
-		{TP: 101, Name: "ცოფის ვაქცინა (Rabies)"},
-		{TP: 2, Name: "ანალიზი (Test)"},
-		{TP: 3, Name: "დეჰელმინთიზაცია (Dehelminization)"},
-		{TP: 4, Name: "ექტოპარაზიტი (Ectoparasite)"},
-		{TP: 5, Name: "ქირურგია (Surgery)"},
-		{TP: 6, Name: "სტომატოლოგია (Dental)"},
-		{TP: 7, Name: "რენტგენი (X-Ray)"},
-		{TP: 8, Name: "ულტრაბგერა (Ultrasound)"},
-		{TP: 9, Name: "ელექტროკარდიოგრამა (ECG)"},
-		{TP: 10, Name: "ენდოსკოპია (Endoscopy)"},
-		{TP: 100, Name: "სტერილიზაცია (Sterilization)"},
-		{TP: 102, Name: "ჩიპირება (Microchipping)"},
-		{TP: 103, Name: "ევთანაზია (Euthanasia)"},
-		{TP: 104, Name: "ლაბორატორია (Laboratory)"},
-		{TP: 108, Name: "კონსულტაცია (Consultation)"},
-		{TP: 109, Name: "მანიპულაცია (Manipulation)"},
+		{TP: 1, Name: "ვაქცინაცია"},
+		{TP: 2, Name: "ანალიზი (ძაღლი)"},
+		{TP: 22, Name: "ანალიზი (კატა)"},
+		{TP: 222, Name: "ანალიზი (სხვა)"},
+		{TP: 11, Name: "ექტოპარაზიტების პრევენცია"},
+		{TP: 12, Name: "დეჰელმინთიზაცია"},
+		{TP: 101, Name: "სტომატოლოგია"},
+		{TP: 102, Name: "კარდიოლოგია"},
+		{TP: 103, Name: "ოქსიგენოთერაპია"},
+		{TP: 104, Name: "ტრავმატოლოგია"},
+		{TP: 105, Name: "დერმატოლოგია"},
+		{TP: 106, Name: "ქირურგია"},
+		{TP: 107, Name: "სხვა პროცედურა"},
+		{TP: 108, Name: "კონსულტაცია"},
+		{TP: 109, Name: "რადიოლოგია"},
+		{TP: 110, Name: "სტერილიზაცია/კასტრაცია"},
+		{TP: 115, Name: "მიკროჩიპი"},
+		{TP: 116, Name: "ლაბორატორია"},
+		{TP: 202, Name: "თერაპია"},
+		{TP: 203, Name: "ოფთალმოლოგია"},
 	}
 	writeJSON(w, http.StatusOK, types)
 }

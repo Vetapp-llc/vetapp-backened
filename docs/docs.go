@@ -486,6 +486,126 @@ const docTemplate = `{
                 }
             }
         },
+        "/auth/change-password": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Change password",
+                "parameters": [
+                    {
+                        "description": "Current and new password",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ChangePasswordRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ChangePasswordResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/email/verify/confirm": {
+            "get": {
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Confirm email verification",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Verification token from the email link",
+                        "name": "token",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "HTML success page",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "HTML error page",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/email/verify/send": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Send email verification",
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.EmailVerifySendResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "email already verified",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/login": {
             "post": {
                 "consumes": [
@@ -550,6 +670,60 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/internal_handlers.UserResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Update current user profile",
+                "parameters": [
+                    {
+                        "description": "Fields to update",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.UpdateMeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.UserResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
                         }
                     },
                     "401": {
@@ -1093,6 +1267,48 @@ const docTemplate = `{
                 }
             }
         },
+        "/owner/pets/{id}/diseases": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "owner"
+                ],
+                "summary": "Get pet diseases / allergies (owner view)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Pet ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_handlers.OwnerDiseaseItem"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/owner/pets/{id}/procedures": {
             "get": {
                 "security": [
@@ -1134,6 +1350,125 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "owner"
+                ],
+                "summary": "Owner adds procedure to pet",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Pet ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Procedure data",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.OwnerCreateProcedureRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.OwnerProcedureItem"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/owner/pets/{id}/procedures/{procId}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "owner"
+                ],
+                "summary": "Owner deletes self-added procedure",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Pet ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Procedure ID",
+                        "name": "procId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.MessageResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/internal_handlers.ErrorResponse"
                         }
@@ -3073,6 +3408,62 @@ const docTemplate = `{
                 }
             }
         },
+        "/subscriptions/apple-verify": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "subscriptions"
+                ],
+                "summary": "Verify Apple IAP receipt",
+                "parameters": [
+                    {
+                        "description": "Apple IAP receipt",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.AppleVerifyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/subscriptions/callback": {
             "post": {
                 "consumes": [
@@ -3287,6 +3678,26 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handlers.AppleVerifyRequest": {
+            "type": "object",
+            "required": [
+                "package_id",
+                "pet_id",
+                "signed_transaction"
+            ],
+            "properties": {
+                "package_id": {
+                    "type": "integer"
+                },
+                "pet_id": {
+                    "type": "integer"
+                },
+                "signed_transaction": {
+                    "description": "StoreKit 2 JWS signed transaction",
+                    "type": "string"
+                }
+            }
+        },
         "internal_handlers.AppointmentResponse": {
             "type": "object",
             "required": [
@@ -3422,6 +3833,36 @@ const docTemplate = `{
                 },
                 "vaccination": {
                     "$ref": "#/definitions/internal_handlers.MedicalRecord"
+                }
+            }
+        },
+        "internal_handlers.ChangePasswordRequest": {
+            "type": "object",
+            "required": [
+                "current_password",
+                "new_password"
+            ],
+            "properties": {
+                "current_password": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "new_password": {
+                    "description": "8 chars matches the registration / reset minimum used elsewhere.",
+                    "type": "string",
+                    "maxLength": 50,
+                    "minLength": 8
+                }
+            }
+        },
+        "internal_handlers.ChangePasswordResponse": {
+            "type": "object",
+            "required": [
+                "ok"
+            ],
+            "properties": {
+                "ok": {
+                    "type": "boolean"
                 }
             }
         },
@@ -3911,6 +4352,22 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handlers.EmailVerifySendResponse": {
+            "type": "object",
+            "required": [
+                "status"
+            ],
+            "properties": {
+                "detail": {
+                    "description": "human-readable note",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "\"sent\" | \"pending\"",
+                    "type": "string"
+                }
+            }
+        },
         "internal_handlers.ErrorResponse": {
             "type": "object",
             "required": [
@@ -4154,10 +4611,127 @@ const docTemplate = `{
                 "pet": {
                     "type": "string"
                 },
+                "petStatus": {
+                    "description": "INHABITANT | ADOPTED | WORKMATE",
+                    "type": "string"
+                },
                 "sex": {
                     "type": "string"
                 },
                 "variety": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.OwnerCreateProcedureRequest": {
+            "type": "object",
+            "required": [
+                "tp"
+            ],
+            "properties": {
+                "anam": {
+                    "type": "string"
+                },
+                "coment": {
+                    "type": "string"
+                },
+                "dani": {
+                    "type": "string"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "date2": {
+                    "type": "string"
+                },
+                "date3": {
+                    "type": "string"
+                },
+                "deh": {
+                    "type": "string"
+                },
+                "diagn": {
+                    "type": "string"
+                },
+                "nout": {
+                    "type": "string"
+                },
+                "ser": {
+                    "type": "string"
+                },
+                "tp": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "tpname": {
+                    "type": "string"
+                },
+                "vac": {
+                    "type": "string"
+                },
+                "vac1": {
+                    "type": "string"
+                },
+                "vac2": {
+                    "type": "string"
+                },
+                "vac3": {
+                    "type": "string"
+                },
+                "vac4": {
+                    "type": "string"
+                },
+                "vac5": {
+                    "type": "string"
+                },
+                "vac6": {
+                    "type": "string"
+                },
+                "vac7": {
+                    "type": "string"
+                },
+                "vac8": {
+                    "type": "string"
+                },
+                "vac9": {
+                    "type": "string"
+                },
+                "vacn": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.OwnerDiseaseItem": {
+            "type": "object",
+            "required": [
+                "id",
+                "name"
+            ],
+            "properties": {
+                "date": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.OwnerEctoItem": {
+            "type": "object",
+            "required": [
+                "name",
+                "type"
+            ],
+            "properties": {
+                "name": {
+                    "description": "brand / preparat name",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "\"drops\" | \"pills\" | \"collar\" | \"spray\"",
                     "type": "string"
                 }
             }
@@ -4311,6 +4885,14 @@ const docTemplate = `{
                 "vetName"
             ],
             "properties": {
+                "addedByOwner": {
+                    "description": "true =\u003e self-reported, deletable",
+                    "type": "boolean"
+                },
+                "anamnesis": {
+                    "description": "tp=10x/20x — anamnesis. tp=1/2 — also surfaced if set.",
+                    "type": "string"
+                },
                 "comment": {
                     "type": "string"
                 },
@@ -4319,6 +4901,13 @@ const docTemplate = `{
                 },
                 "diagnosis": {
                     "type": "string"
+                },
+                "ectoItems": {
+                    "description": "populated only for tp=11 records",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handlers.OwnerEctoItem"
+                    }
                 },
                 "id": {
                     "type": "string"
@@ -4329,10 +4918,33 @@ const docTemplate = `{
                 "notes": {
                     "type": "string"
                 },
+                "preparat": {
+                    "description": "tp=1 — vaccine brand. tp=12 — dewormer drug.",
+                    "type": "string"
+                },
+                "prescription": {
+                    "description": "dani column — prescription / დანიშნულება. Shown on every category.",
+                    "type": "string"
+                },
                 "procedureName": {
                     "type": "string"
                 },
                 "procedureType": {
+                    "type": "string"
+                },
+                "serial": {
+                    "description": "tp=1 — batch / serial number",
+                    "type": "string"
+                },
+                "testResults": {
+                    "description": "populated only for tp=2/22/222 records",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handlers.OwnerTestResult"
+                    }
+                },
+                "treatment": {
+                    "description": "tp=10x/20x — treatment / medications administered",
                     "type": "string"
                 },
                 "vaccinations": {
@@ -4341,7 +4953,33 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "vaccineType": {
+                    "description": "tp=1 — vaccine type (\"კომპლექსური ვაქცინა\")",
+                    "type": "string"
+                },
+                "vetFullName": {
+                    "description": "resolved \"First Last\" via JOIN",
+                    "type": "string"
+                },
                 "vetName": {
+                    "description": "raw column value (id or free-text)",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.OwnerTestResult": {
+            "type": "object",
+            "required": [
+                "label",
+                "result"
+            ],
+            "properties": {
+                "label": {
+                    "description": "human-readable test name (Georgian)",
+                    "type": "string"
+                },
+                "result": {
+                    "description": "typically \"დადებითი\" / \"უარყოფითი\" but can be free text",
                     "type": "string"
                 }
             }
@@ -5052,6 +5690,26 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handlers.UpdateMeRequest": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string"
+                },
+                "city": {
+                    "type": "string"
+                },
+                "country_id": {
+                    "type": "integer"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "phone": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handlers.UserResponse": {
             "type": "object",
             "required": [
@@ -5066,11 +5724,23 @@ const docTemplate = `{
                 "zip"
             ],
             "properties": {
+                "address": {
+                    "type": "string"
+                },
+                "city": {
+                    "type": "string"
+                },
                 "company_name": {
                     "type": "string"
                 },
+                "country_id": {
+                    "type": "integer"
+                },
                 "email": {
                     "type": "string"
+                },
+                "email_verified": {
+                    "type": "boolean"
                 },
                 "first_name": {
                     "type": "string"
@@ -5086,6 +5756,9 @@ const docTemplate = `{
                 },
                 "phone": {
                     "type": "string"
+                },
+                "phone_verified": {
+                    "type": "boolean"
                 },
                 "status": {
                     "type": "string"
@@ -5157,12 +5830,20 @@ const docTemplate = `{
         "vetapp-backend_internal_models.Procedure": {
             "type": "object",
             "properties": {
+                "address": {
+                    "description": "Denormalized identity / housekeeping columns the legacy table also\nstores. Mostly redundant with Pet but the PHP forms set them on\nevery save and some queries depend on them.",
+                    "type": "string"
+                },
                 "anam": {
                     "description": "Anamnesis",
                     "type": "string"
                 },
                 "coment": {
-                    "description": "Comment (visible to owner)",
+                    "description": "Comment visible to owner",
+                    "type": "string"
+                },
+                "company": {
+                    "description": "payment method label e.g. \"ბარათი\", \"ნაღდი\"",
                     "type": "string"
                 },
                 "dani": {
@@ -5178,11 +5859,11 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "date3": {
-                    "description": "Reminder date",
+                    "description": "SMS reminder trigger date (= date2 - 1 month)",
                     "type": "string"
                 },
                 "deh": {
-                    "description": "Dehel drug / test result (Canine Babesia)",
+                    "description": "Dehel drug-from-list (tp=12) OR Canine Babesia result (tp=2)",
                     "type": "string"
                 },
                 "diagn": {
@@ -5193,7 +5874,11 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "koment": {
-                    "description": "Vet notes (internal)",
+                    "description": "Vet-internal notes",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "edit-log message column (NOT the pet name — that's PName)",
                     "type": "string"
                 },
                 "nout": {
@@ -5212,6 +5897,10 @@ const docTemplate = `{
                     "description": "Payment status: \"0\"=unpaid, \"1\"=paid",
                     "type": "string"
                 },
+                "pn": {
+                    "description": "owner personal-id copy",
+                    "type": "string"
+                },
                 "pname": {
                     "description": "Pet name (denormalized)",
                     "type": "string"
@@ -5220,12 +5909,41 @@ const docTemplate = `{
                     "description": "Price in GEL",
                     "type": "string"
                 },
+                "sax": {
+                    "description": "pet sex denormalized",
+                    "type": "string"
+                },
                 "ser": {
-                    "description": "Vaccine serial/batch number",
+                    "description": "Vaccine serial / batch number",
                     "type": "string"
                 },
                 "sk": {
                     "description": "Clinic zip",
+                    "type": "string"
+                },
+                "test1": {
+                    "description": "Extra test-result columns specific to dog tests (tp=2). PHP form\nat vet/addtest.php uses these for the Caniv 4DX panel + CDV/CAV\ntest slots. Other tps leave them empty.",
+                    "type": "string"
+                },
+                "test2": {
+                    "type": "string"
+                },
+                "test3": {
+                    "type": "string"
+                },
+                "test4": {
+                    "type": "string"
+                },
+                "test5": {
+                    "type": "string"
+                },
+                "test6": {
+                    "type": "string"
+                },
+                "test7": {
+                    "type": "string"
+                },
+                "test8": {
                     "type": "string"
                 },
                 "tp": {
@@ -5233,7 +5951,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "tpname": {
-                    "description": "Procedure type name",
+                    "description": "Procedure type display name",
                     "type": "string"
                 },
                 "uuid": {
@@ -5241,11 +5959,11 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "vac": {
-                    "description": "Vaccine/procedure name",
+                    "description": "Vaccine/procedure name OR tp=11 drops-custom OR tp=12 custom drug",
                     "type": "string"
                 },
                 "vac1": {
-                    "description": "Test result fields",
+                    "description": "Polymorphic content slots. For tp=11 (ecto): drops/pills/collar/\nspray with custom-text in Vac/Vac2/Vac4/Vac6 and dropdown choice\nin Vac1/Vac3/Vac5/Vac7. For tp=2/22/222: test panel results. For\ntp=10x/20x (generic): Vac1=anamnesis, Vac2=diagnosis, Vac3=treatment.\nVac8/Vac9 are unused in production data (empty in all rows we've\ninspected) but kept here for legacy compatibility.",
                     "type": "string"
                 },
                 "vac2": {
@@ -5273,11 +5991,11 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "vacn": {
-                    "description": "Brand",
+                    "description": "Brand OR tp=2 Leishmania result",
                     "type": "string"
                 },
                 "vetname": {
-                    "description": "Vet member ID",
+                    "description": "Vet member ID (numeric string) — empty/0 means owner-added",
                     "type": "string"
                 }
             }

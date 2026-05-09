@@ -53,10 +53,14 @@ func main() {
 	// Initialize services
 	authService := services.NewAuthService(cfg)
 	smsService := services.NewSMSService(cfg)
+	// EmailService degrades gracefully when RESEND_API_KEY is unset —
+	// the SendEmailVerification handler returns status="pending"
+	// rather than 5xx so the mobile UI shows the friendly fallback.
+	emailService := services.NewEmailService(cfg)
 	ipayService := services.NewIPayService(cfg)
 
 	// Setup router with all routes
-	r := router.Setup(db, authService, smsService, ipayService, cfg.BaseURL)
+	r := router.Setup(db, authService, smsService, emailService, ipayService, cfg.BaseURL, cfg.EmailVerifyBaseURL)
 
 	// Start server
 	addr := ":" + cfg.Port
