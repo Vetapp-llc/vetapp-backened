@@ -445,3 +445,34 @@ func TestOwnerWriteAllowedTPs(t *testing.T) {
 		}
 	}
 }
+
+// commaDate converts the reminder date into the legacy comma format
+// stored in vaccination.date3. Legacy sentinels must survive untouched
+// — the clinic's PHP tooling still reads these columns, and rewriting
+// ",-1," or "--" into something "cleaner" would corrupt live rows.
+func TestCommaDate(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		// ISO dates convert.
+		{"2027-03-18", "2027,03,18"},
+		{"2026-12-31", "2026,12,31"},
+		{"2000-01-01", "2000,01,01"},
+		// Legacy sentinels and junk pass through unchanged.
+		{"", ""},
+		{"--", "--"},
+		{",-1,", ",-1,"},
+		{"2027,03,18", "2027,03,18"},
+		// Wrong shape or non-digits: leave alone rather than mangle.
+		{"2027-3-18", "2027-3-18"},
+		{"not-a-date", "not-a-date"},
+		{"20270318", "20270318"},
+		{"abcd-ef-gh", "abcd-ef-gh"},
+	}
+	for _, tc := range cases {
+		if got := commaDate(tc.in); got != tc.want {
+			t.Errorf("commaDate(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

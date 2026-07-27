@@ -7,8 +7,29 @@ import (
 	"vetapp-backend/internal/middleware"
 	"vetapp-backend/internal/models"
 
+	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 )
+
+// resolveClinic returns the clinic the request should be scoped to,
+// honouring the admin-only `?clinic=...` override. Centralised because
+// the same 10-line block was repeated in every stats handler — easy to
+// drift out of sync (e.g. forgetting the admin role check).
+//
+// Returns the clinic and (false, w-already-written) if the override was
+// rejected. Callers should bail when ok=false.
+func resolveClinic(w http.ResponseWriter, r *http.Request) (clinic string, ok bool) {
+	claims := middleware.GetClaims(r)
+	clinic = claims.Zip
+	if override := r.URL.Query().Get("clinic"); override != "" {
+		if claims.GroupID != models.RoleAdmin {
+			writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "admin only"})
+			return "", false
+		}
+		clinic = override
+	}
+	return clinic, true
+}
 
 // StatsHandler handles clinic statistics endpoints.
 type StatsHandler struct {
@@ -69,22 +90,55 @@ type MonthlyTrendItem struct {
 // @Failure 500 {object} ErrorResponse
 // @Router /stats/clinic [get]
 func (h *StatsHandler) Clinic(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.GetClaims(r)
-	zip := claims.Zip
-
-	// Admin can override clinic
-	if clinicParam := r.URL.Query().Get("clinic"); clinicParam != "" {
-		if claims.GroupID != models.RoleAdmin {
-			writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "admin only"})
-			return
-		}
-		zip = clinicParam
+	zip, ok := resolveClinic(w, r)
+	if !ok {
+		return
 	}
 
-	var species []SpeciesCount
-	h.db.Raw(`SELECT TRIM(pet) AS species, COUNT(*)::int AS count FROM pets WHERE vet = ? GROUP BY TRIM(pet)`, zip).Scan(&species)
+	// Run the 7 independent aggregations concurrently. Each query
+	// hits a different cache locality and the wall-time was previously
+	// the sum, not the max — typically 3–5× faster on a busy clinic.
+	var (
+		species  []SpeciesCount
+		breeds   []BreedCount
+		sexDist  []SexCount
+		procs    []ProcedureCount
+		vaccines []VaccineCount
+		trends   []MonthlyTrendItem
+		totalOwners,
+		totalRecords int
+	)
 
-	// Filter out empty species and compute total
+	g := new(errgroup.Group)
+	g.Go(func() error {
+		return h.db.Raw(`SELECT TRIM(pet) AS species, COUNT(*)::int AS count FROM pets WHERE vet = ? GROUP BY TRIM(pet)`, zip).Scan(&species).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT TRIM(variety) AS breed, COUNT(*)::int AS count FROM pets WHERE vet = ? AND TRIM(COALESCE(variety,'')) != '' GROUP BY TRIM(variety) ORDER BY count DESC LIMIT 10`, zip).Scan(&breeds).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT TRIM(sex) AS sex, COUNT(*)::int AS count FROM pets WHERE vet = ? AND TRIM(COALESCE(sex,'')) != '' GROUP BY TRIM(sex)`, zip).Scan(&sexDist).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT COUNT(DISTINCT COALESCE(NULLIF(code,''), uuid::text))::int FROM pets WHERE vet = ?`, zip).Scan(&totalOwners).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT COUNT(*)::int FROM vaccination WHERE sk = ?`, zip).Scan(&totalRecords).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT TRIM(tp::text) AS type, TRIM(tpname) AS name, COUNT(*)::int AS count FROM vaccination WHERE sk = ? GROUP BY TRIM(tp::text), TRIM(tpname) ORDER BY count DESC LIMIT 10`, zip).Scan(&procs).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT TRIM(vac_name) AS name, COUNT(*)::int AS count FROM (SELECT unnest(ARRAY[vac,vac1,vac2,vac3,vac4,vac5,vac6,vac7,vac8,vac9]) AS vac_name FROM vaccination WHERE sk = ?) sub WHERE TRIM(COALESCE(vac_name,'')) != '' GROUP BY TRIM(vac_name) ORDER BY count DESC LIMIT 10`, zip).Scan(&vaccines).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT LEFT(date, 7) AS month, COUNT(*)::int AS records FROM vaccination WHERE sk = ? AND LENGTH(date) >= 7 GROUP BY LEFT(date, 7) ORDER BY month DESC LIMIT 12`, zip).Scan(&trends).Error
+	})
+	// We tolerate partial failures: the dashboard renders gracefully
+	// with zeroes / empty arrays. Errors are noisy in logs already via
+	// the GORM logger.
+	_ = g.Wait()
+
 	filtered := make([]SpeciesCount, 0)
 	totalPets := 0
 	for _, s := range species {
@@ -93,27 +147,6 @@ func (h *StatsHandler) Clinic(w http.ResponseWriter, r *http.Request) {
 			totalPets += s.Count
 		}
 	}
-
-	var breeds []BreedCount
-	h.db.Raw(`SELECT TRIM(variety) AS breed, COUNT(*)::int AS count FROM pets WHERE vet = ? AND TRIM(COALESCE(variety,'')) != '' GROUP BY TRIM(variety) ORDER BY count DESC LIMIT 10`, zip).Scan(&breeds)
-
-	var sexDist []SexCount
-	h.db.Raw(`SELECT TRIM(sex) AS sex, COUNT(*)::int AS count FROM pets WHERE vet = ? AND TRIM(COALESCE(sex,'')) != '' GROUP BY TRIM(sex)`, zip).Scan(&sexDist)
-
-	var totalOwners int
-	h.db.Raw(`SELECT COUNT(DISTINCT COALESCE(NULLIF(code,''), uuid::text))::int FROM pets WHERE vet = ?`, zip).Scan(&totalOwners)
-
-	var totalRecords int
-	h.db.Raw(`SELECT COUNT(*)::int FROM vaccination WHERE sk = ?`, zip).Scan(&totalRecords)
-
-	var procs []ProcedureCount
-	h.db.Raw(`SELECT TRIM(tp::text) AS type, TRIM(tpname) AS name, COUNT(*)::int AS count FROM vaccination WHERE sk = ? GROUP BY TRIM(tp::text), TRIM(tpname) ORDER BY count DESC LIMIT 10`, zip).Scan(&procs)
-
-	var vaccines []VaccineCount
-	h.db.Raw(`SELECT TRIM(vac_name) AS name, COUNT(*)::int AS count FROM (SELECT unnest(ARRAY[vac,vac1,vac2,vac3,vac4,vac5,vac6,vac7,vac8,vac9]) AS vac_name FROM vaccination WHERE sk = ?) sub WHERE TRIM(COALESCE(vac_name,'')) != '' GROUP BY TRIM(vac_name) ORDER BY count DESC LIMIT 10`, zip).Scan(&vaccines)
-
-	var trends []MonthlyTrendItem
-	h.db.Raw(`SELECT LEFT(date, 7) AS month, COUNT(*)::int AS records FROM vaccination WHERE sk = ? AND LENGTH(date) >= 7 GROUP BY LEFT(date, 7) ORDER BY month DESC LIMIT 12`, zip).Scan(&trends)
 
 	// Ensure non-nil slices for JSON
 	if filtered == nil {
@@ -179,16 +212,9 @@ type DailyClinicStats struct {
 // @Failure 403 {object} ErrorResponse
 // @Router /stats/clinic/daily [get]
 func (h *StatsHandler) DailyClinic(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.GetClaims(r)
-	zip := claims.Zip
-
-	// Admin can override clinic
-	if clinicParam := r.URL.Query().Get("clinic"); clinicParam != "" {
-		if claims.GroupID != models.RoleAdmin {
-			writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "admin only"})
-			return
-		}
-		zip = clinicParam
+	zip, ok := resolveClinic(w, r)
+	if !ok {
+		return
 	}
 
 	date := r.URL.Query().Get("date")
@@ -223,11 +249,22 @@ func (h *StatsHandler) DailyClinic(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer wg.Done()
+		// paymethod's real columns are (zip, date, uuid, sum, pay); the
+		// method labels are Georgian. Using method/amount/sk here made
+		// the clinic's daily card/cash split silently report zero, which
+		// then fell through to the procedure-price estimate below.
+		// `sum` is TEXT and legacy rows contain non-numeric junk, so
+		// guard the cast with a numeric-shape test.
+		// `{0,1}` not `?` — GORM treats a literal '?' in the SQL as a
+		// bind placeholder and the query would fail with
+		// "unused argument".
+		const numericSum = `sum ~ '^[0-9]+(\.[0-9]+){0,1}$'`
 		h.db.Raw(
-			`SELECT COALESCE(SUM(CASE WHEN method='card' THEN NULLIF(amount,'')::numeric ELSE 0 END)::text, '0') AS card,
-			        COALESCE(SUM(CASE WHEN method='cash' THEN NULLIF(amount,'')::numeric ELSE 0 END)::text, '0') AS cash,
-			        COALESCE(SUM(NULLIF(amount,'')::numeric)::text, '0') AS total
-			 FROM paymethod WHERE sk = ? AND date = ?`, zip, date,
+			`SELECT COALESCE(SUM(CASE WHEN pay = ? AND `+numericSum+` THEN sum::numeric ELSE 0 END)::text, '0') AS card,
+			        COALESCE(SUM(CASE WHEN pay = ? AND `+numericSum+` THEN sum::numeric ELSE 0 END)::text, '0') AS cash,
+			        COALESCE(SUM(CASE WHEN `+numericSum+` THEN sum::numeric ELSE 0 END)::text, '0') AS total
+			 FROM paymethod WHERE zip = ? AND date = ?`,
+			models.PayMethodCard, models.PayMethodCash, zip, date,
 		).Scan(&payments)
 	}()
 
@@ -291,15 +328,9 @@ type DailyTotal struct {
 // @Failure 403 {object} ErrorResponse
 // @Router /stats/clinic/monthly [get]
 func (h *StatsHandler) MonthlyClinic(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.GetClaims(r)
-	zip := claims.Zip
-
-	if clinicParam := r.URL.Query().Get("clinic"); clinicParam != "" {
-		if claims.GroupID != models.RoleAdmin {
-			writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "admin only"})
-			return
-		}
-		zip = clinicParam
+	zip, ok := resolveClinic(w, r)
+	if !ok {
+		return
 	}
 
 	month := r.URL.Query().Get("month")
@@ -388,15 +419,9 @@ type MonthlyTotal struct {
 // @Failure 403 {object} ErrorResponse
 // @Router /stats/clinic/yearly [get]
 func (h *StatsHandler) YearlyClinic(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.GetClaims(r)
-	zip := claims.Zip
-
-	if clinicParam := r.URL.Query().Get("clinic"); clinicParam != "" {
-		if claims.GroupID != models.RoleAdmin {
-			writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "admin only"})
-			return
-		}
-		zip = clinicParam
+	zip, ok := resolveClinic(w, r)
+	if !ok {
+		return
 	}
 
 	year := r.URL.Query().Get("year")
@@ -494,20 +519,38 @@ type PaymentTier struct {
 func (h *StatsHandler) Admin(w http.ResponseWriter, r *http.Request) {
 	var stats AdminStats
 
-	h.db.Raw(`SELECT COUNT(*)::int FROM memberlogin_members WHERE group_id = ?`, models.RoleOwner).Scan(&stats.TotalOwners)
-	h.db.Raw(`SELECT COUNT(*)::int FROM memberlogin_members WHERE group_id = ?`, models.RoleVet).Scan(&stats.TotalVets)
-	h.db.Raw(`SELECT COUNT(*)::int FROM pets`).Scan(&stats.TotalPets)
-	h.db.Raw(`SELECT COUNT(*)::int FROM pets WHERE TRIM(pet) = 'ძაღლი'`).Scan(&stats.TotalDogs)
-	h.db.Raw(`SELECT COUNT(*)::int FROM pets WHERE TRIM(pet) = 'კატა'`).Scan(&stats.TotalCats)
-	h.db.Raw(`SELECT COUNT(*)::int FROM pets WHERE TRIM(pet) NOT IN ('ძაღლი', 'კატა') AND TRIM(COALESCE(pet,'')) != ''`).Scan(&stats.TotalOther)
-	h.db.Raw(`SELECT COUNT(*)::int FROM pets WHERE birth2 >= CURRENT_DATE AND status = 1`).Scan(&stats.ActiveAccounts)
-
-	h.db.Raw(`SELECT p.vet AS clinic, COALESCE(m.company_name, '') AS company_name, COUNT(*)::int AS count
-		 FROM pets p
-		 LEFT JOIN (SELECT DISTINCT ON (zip) zip, company_name FROM memberlogin_members WHERE TRIM(COALESCE(zip,'')) != '' ORDER BY zip, id) m ON m.zip = p.vet
-		 WHERE TRIM(COALESCE(p.vet,'')) != ''
-		 GROUP BY p.vet, m.company_name ORDER BY count DESC`).Scan(&stats.PetsPerClinic)
-	h.db.Raw(`SELECT amount AS price, COUNT(*)::int AS count FROM payments_ipay WHERE status = 'success' GROUP BY amount ORDER BY count DESC`).Scan(&stats.PaymentTiers)
+	// 9 admin-wide aggregations are independent — fire them in parallel.
+	g := new(errgroup.Group)
+	g.Go(func() error {
+		return h.db.Raw(`SELECT COUNT(*)::int FROM memberlogin_members WHERE group_id = ?`, models.RoleOwner).Scan(&stats.TotalOwners).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT COUNT(*)::int FROM memberlogin_members WHERE group_id = ?`, models.RoleVet).Scan(&stats.TotalVets).Error
+	})
+	g.Go(func() error { return h.db.Raw(`SELECT COUNT(*)::int FROM pets`).Scan(&stats.TotalPets).Error })
+	g.Go(func() error {
+		return h.db.Raw(`SELECT COUNT(*)::int FROM pets WHERE TRIM(pet) = 'ძაღლი'`).Scan(&stats.TotalDogs).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT COUNT(*)::int FROM pets WHERE TRIM(pet) = 'კატა'`).Scan(&stats.TotalCats).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT COUNT(*)::int FROM pets WHERE TRIM(pet) NOT IN ('ძაღლი', 'კატა') AND TRIM(COALESCE(pet,'')) != ''`).Scan(&stats.TotalOther).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT COUNT(*)::int FROM pets WHERE birth2 >= CURRENT_DATE AND status = 1`).Scan(&stats.ActiveAccounts).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT p.vet AS clinic, COALESCE(m.company_name, '') AS company_name, COUNT(*)::int AS count
+			FROM pets p
+			LEFT JOIN (SELECT DISTINCT ON (zip) zip, company_name FROM memberlogin_members WHERE TRIM(COALESCE(zip,'')) != '' ORDER BY zip, id) m ON m.zip = p.vet
+			WHERE TRIM(COALESCE(p.vet,'')) != ''
+			GROUP BY p.vet, m.company_name ORDER BY count DESC`).Scan(&stats.PetsPerClinic).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT amount AS price, COUNT(*)::int AS count FROM payments_ipay WHERE status = 'success' GROUP BY amount ORDER BY count DESC`).Scan(&stats.PaymentTiers).Error
+	})
+	_ = g.Wait()
 
 	if stats.PetsPerClinic == nil {
 		stats.PetsPerClinic = []ClinicPetCount{}

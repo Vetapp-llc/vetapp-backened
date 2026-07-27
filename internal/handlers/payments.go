@@ -32,14 +32,17 @@ type RecordPaymentRequest struct {
 }
 
 // PaymentResponse is the API response for a payment.
+//
+// `vet_id` and `owner` are deliberately absent: the paymethod table has
+// no such columns (see models.Payment), so the previous fields could
+// only ever have returned empty strings. A payment is attributed via
+// the pet (`uuid`) and the clinic.
 type PaymentResponse struct {
 	ID     uint   `json:"id" validate:"required"`
 	UUID   string `json:"uuid" validate:"required"`
 	Date   string `json:"date" validate:"required"`
 	Method string `json:"method" validate:"required"`
 	Amount string `json:"amount" validate:"required"`
-	VetID  string `json:"vet_id" validate:"required"`
-	Owner  string `json:"owner" validate:"required"`
 }
 
 // DailySummary is the daily payment summary.
@@ -53,7 +56,7 @@ type DailySummary struct {
 func paymentToResponse(p models.Payment) PaymentResponse {
 	return PaymentResponse{
 		ID: p.ID, UUID: p.UUID, Date: p.Date, Method: p.Method,
-		Amount: p.Amount, VetID: p.VetID, Owner: p.Owner,
+		Amount: p.Amount,
 	}
 }
 
@@ -80,14 +83,17 @@ func (h *PaymentHandler) Record(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The API speaks "card"/"cash"; the column stores the Georgian
+	// labels the legacy PHP frontend writes ("ბარათი" / "ნაღდი
+	// ანგარიშწორება"). Translate on the way in so the clinic's existing
+	// reports — which group by this column — see one consistent set of
+	// values regardless of which frontend recorded the payment.
 	payment := models.Payment{
 		UUID:   req.UUID,
 		Date:   req.Date,
-		Method: req.Method,
+		Method: models.NormalizePayMethod(req.Method),
 		Amount: req.Amount,
 		SK:     claims.Zip,
-		VetID:  formatUint(claims.UserID),
-		Owner:  req.Owner,
 	}
 
 	if err := h.db.Create(&payment).Error; err != nil {
@@ -131,14 +137,29 @@ func (h *PaymentHandler) Daily(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var summary DailySummary
-	summary.Date = date
 
+	// Real column names on `paymethod` are (zip, date, uuid, sum, pay) —
+	// this query previously used method/amount/sk and so returned zeros
+	// for every clinic on every date. `pay` holds the Georgian method
+	// labels; `sum` is TEXT and can contain blanks and stray characters
+	// in legacy rows, so it is filtered to a numeric shape before the
+	// cast rather than allowed to abort the whole aggregate.
+	// NOTE the `{0,1}` instead of the usual `?` quantifier: GORM counts
+	// every literal '?' in the SQL string as a bind placeholder, so a
+	// regex containing one desynchronises the argument list and the
+	// query fails with "unused argument".
+	const numericSum = `sum ~ '^[0-9]+(\.[0-9]+){0,1}$'`
 	h.db.Raw(
-		`SELECT COALESCE(SUM(CASE WHEN method='card' THEN amount::numeric ELSE 0 END)::text, '0') AS card,
-		        COALESCE(SUM(CASE WHEN method='cash' THEN amount::numeric ELSE 0 END)::text, '0') AS cash,
-		        COALESCE(SUM(amount::numeric)::text, '0') AS total
-		 FROM paymethod WHERE sk = ? AND date = ?`, clinic, date,
+		`SELECT COALESCE(SUM(CASE WHEN pay = ? AND `+numericSum+` THEN sum::numeric ELSE 0 END)::text, '0') AS card,
+		        COALESCE(SUM(CASE WHEN pay = ? AND `+numericSum+` THEN sum::numeric ELSE 0 END)::text, '0') AS cash,
+		        COALESCE(SUM(CASE WHEN `+numericSum+` THEN sum::numeric ELSE 0 END)::text, '0') AS total
+		 FROM paymethod WHERE zip = ? AND date = ?`,
+		models.PayMethodCard, models.PayMethodCash, clinic, date,
 	).Scan(&summary)
+
+	// Set after the Scan: the aggregate selects no `date` column, so
+	// scanning into the struct zeroes anything assigned beforehand.
+	summary.Date = date
 
 	writeJSON(w, http.StatusOK, summary)
 }
@@ -149,7 +170,6 @@ func (h *PaymentHandler) Daily(w http.ResponseWriter, r *http.Request) {
 // @Produce json
 // @Security BearerAuth
 // @Param clinic query string false "Clinic code"
-// @Param vet_id query string false "Vet member ID"
 // @Param date_from query string false "Start date (YYYY-MM-DD)"
 // @Param date_to query string false "End date (YYYY-MM-DD)"
 // @Success 200 {array} PaymentResponse
@@ -163,11 +183,14 @@ func (h *PaymentHandler) History(w http.ResponseWriter, r *http.Request) {
 	if clinic == "" {
 		clinic = claims.Zip
 	}
-	query = query.Where("sk = ?", clinic)
+	// Raw column name: these Where clauses are SQL strings, so they must
+	// use the real column (`zip`), not the Go field name.
+	query = query.Where("zip = ?", clinic)
 
-	if vetID := r.URL.Query().Get("vet_id"); vetID != "" {
-		query = query.Where("vet_id = ?", vetID)
-	}
+	// NOTE: the documented `vet_id` filter is not supported — paymethod
+	// has no per-staff column (see models.Payment). It is accepted and
+	// ignored rather than 400-ing, so existing callers don't break; the
+	// swagger annotation above no longer advertises it.
 	if dateFrom := r.URL.Query().Get("date_from"); dateFrom != "" {
 		query = query.Where("date >= ?", dateFrom)
 	}

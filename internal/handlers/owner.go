@@ -43,20 +43,17 @@ type OwnerPetItem struct {
 }
 
 // OwnerPetDetail is the full detail view for a pet from the owner portal.
-// OwnerProcedureCategoryCount is a procedure type with its record count.
-type OwnerProcedureCategoryCount struct {
-	TP    int    `json:"tp"`
-	Name  string `json:"name"`
-	Count int    `json:"count"`
-}
-
+//
+// `Categories` is shared with the public pet profile via the package-
+// level `ProcedureCategoryCount` type — same shape, same JSON, so the
+// owner-specific alias was just dead code.
 type OwnerPetDetail struct {
 	OwnerPetItem
-	UUID       string                        `json:"uuid" validate:"required"`
-	Vet        string                        `json:"vet" validate:"required"`
-	Castrated  bool                          `json:"castrated" validate:"required"`
-	Code       string                        `json:"code" validate:"required"`
-	Categories []OwnerProcedureCategoryCount  `json:"categories"`
+	UUID       string                   `json:"uuid" validate:"required"`
+	Vet        string                   `json:"vet" validate:"required"`
+	Castrated  bool                     `json:"castrated" validate:"required"`
+	Code       string                   `json:"code" validate:"required"`
+	Categories []ProcedureCategoryCount `json:"categories"`
 }
 
 // OwnerCreatePetRequest is the request body for an owner adding a pet.
@@ -271,49 +268,13 @@ func (h *OwnerPortalHandler) GetPet(w http.ResponseWriter, r *http.Request) {
 
 	petID := strconv.Itoa(int(pet.ID))
 
-	// Count procedures by type
-	type tpCount struct {
-		TP    int
-		Count int
-	}
-	var counts []tpCount
-	h.db.Model(&models.Procedure{}).
-		Select("tp as tp, COUNT(*) as count").
-		Where("uuid = ?", petID).
-		Group("tp").
-		Scan(&counts)
-
-	// Count allergies
-	var allergyCount int64
-	h.db.Model(&models.Allergy{}).Where("uuid = ?", petID).Count(&allergyCount)
-
-	categories := make([]OwnerProcedureCategoryCount, 0, len(counts)+1)
-	for _, c := range counts {
-		name := procedureTypeNames[c.TP]
-		if name == "" {
-			name = "სხვა"
-		}
-		categories = append(categories, OwnerProcedureCategoryCount{
-			TP:    c.TP,
-			Name:  name,
-			Count: c.Count,
-		})
-	}
-	if allergyCount > 0 {
-		categories = append(categories, OwnerProcedureCategoryCount{
-			TP:    999,
-			Name:  "ალერგია / დაავადება",
-			Count: int(allergyCount),
-		})
-	}
-
 	detail := OwnerPetDetail{
 		OwnerPetItem: petToOwnerItem(*pet),
 		UUID:         pet.UUID,
 		Vet:          pet.Vet,
 		Castrated:    pet.Cast != "",
 		Code:         pet.Code,
-		Categories:   categories,
+		Categories:   buildPetCategories(h.db, petID),
 	}
 
 	writeJSON(w, http.StatusOK, detail)
@@ -817,8 +778,24 @@ func (h *OwnerPortalHandler) Calendar(w http.ResponseWriter, r *http.Request) {
 
 	today := time.Now().Format("2006-01-02")
 
+	// Upcoming reminders are rows whose reminder date (`date2`) is in the
+	// future. `date2` is TEXT in ISO form, so a lexicographic >= is a
+	// correct date comparison for that format.
+	//
+	// This previously also required `date3 > '2'`, on the belief that
+	// date3 was a status flag ("1" cancelled / "2" sent / "3" pending).
+	// It isn't: date3 holds the same reminder date in comma format
+	// ("2027,03,18"), so the comparison only ever passed because year
+	// strings sort above "2". Its real effect was to hide every
+	// owner-created reminder, which the mobile client stores with an
+	// empty date3 — the calendar tab was permanently empty for pets
+	// whose records the owner added themselves. Filtering on the date
+	// alone is what the screen actually means.
+	//
+	// Rows carrying legacy sentinels ("--", "") in date2 simply fail the
+	// >= compare and stay excluded, as before.
 	var procs []models.Procedure
-	h.db.Where("uuid IN ? AND date2 >= ? AND date3 > '2'", petIDs, today).
+	h.db.Where("uuid IN ? AND date2 >= ?", petIDs, today).
 		Order("date2 ASC").Find(&procs)
 
 	items := make([]CalendarItem, len(procs))
@@ -833,6 +810,28 @@ func (h *OwnerPortalHandler) Calendar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, items)
+}
+
+// commaDate converts an ISO date ("2027-03-18") into the legacy
+// comma-separated form the PHP scheme stores in `vaccination.date3`
+// ("2027,03,18").
+//
+// Anything that isn't a plain ISO date is passed through untouched:
+// legacy rows carry sentinels like ",-1," and "--" in these columns and
+// rewriting them would corrupt data the clinic tooling still reads.
+func commaDate(iso string) string {
+	if len(iso) != 10 || iso[4] != '-' || iso[7] != '-' {
+		return iso
+	}
+	for i, c := range iso {
+		if i == 4 || i == 7 {
+			continue
+		}
+		if c < '0' || c > '9' {
+			return iso
+		}
+	}
+	return iso[0:4] + "," + iso[5:7] + "," + iso[8:10]
 }
 
 // procedureNameForTP returns the canonical Georgian procedure name for a
@@ -1092,12 +1091,24 @@ func (h *OwnerPortalHandler) CreateProcedure(w http.ResponseWriter, r *http.Requ
 		tpName = procedureNameForTP(req.TP)
 	}
 
+	// `date3` is the legacy comma-formatted mirror of the reminder date
+	// `date2` ("2027,03,18" for date2 "2027-03-18") — the PHP clinic
+	// tooling writes both and reads date3. The mobile client never sends
+	// it, so without this every owner-created reminder was stored with
+	// date3="" and then dropped by the calendar query, which filters on
+	// date3. Derive it here rather than making the client supply a
+	// redundant second encoding of a date it already sent.
+	date3 := req.Date3
+	if date3 == "" {
+		date3 = commaDate(req.Date2)
+	}
+
 	proc := models.Procedure{
 		UUID:   petID,
 		TP:     req.TP,
 		Date:   req.Date,
 		Date2:  req.Date2,
-		Date3:  req.Date3,
+		Date3:  date3,
 		TPName: tpName,
 		Vac:    req.Vac,
 		VacN:   req.VacN,

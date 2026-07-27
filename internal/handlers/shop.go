@@ -24,24 +24,37 @@ func NewShopHandler(db *gorm.DB) *ShopHandler {
 // --- Request/Response types ---
 
 // CreateShopRequest is the request body for adding a sale.
+//
+// `method` and `comment` mirror the two columns the legacy PHP sale
+// form writes (`pay` and `coment`). Without them a sale recorded from
+// the new frontend would be missing the payment method that the
+// clinic's revenue reports group by, and the quantity note staff rely
+// on ("8 ტაბლეტი"). Both are optional so existing clients keep working.
 type CreateShopRequest struct {
-	Name  string `json:"name" validate:"required"`
-	Price string `json:"price" validate:"required"`
-	Date  string `json:"date" validate:"required"`
+	Name    string `json:"name" validate:"required"`
+	Price   string `json:"price" validate:"required"`
+	Date    string `json:"date" validate:"required"`
+	Method  string `json:"method" validate:"omitempty,oneof=card cash"`
+	Comment string `json:"comment"`
 }
 
 // ShopResponse is the API response for a sale.
+//
+// `vetname` is gone: the shop table has no staff column (see
+// models.Shop), so the field could only ever return an empty string.
 type ShopResponse struct {
 	ID      uint   `json:"id" validate:"required"`
 	Name    string `json:"name" validate:"required"`
 	Price   string `json:"price" validate:"required"`
 	Date    string `json:"date" validate:"required"`
-	VetName string `json:"vetname" validate:"required"`
+	Method  string `json:"method"`
+	Comment string `json:"comment"`
 }
 
 func shopToResponse(s models.Shop) ShopResponse {
 	return ShopResponse{
-		ID: s.ID, Name: s.Name, Price: s.Price, Date: s.Date, VetName: s.VetName,
+		ID: s.ID, Name: s.Name, Price: s.Price, Date: s.Date,
+		Method: s.Method, Comment: s.Comment,
 	}
 }
 
@@ -66,7 +79,8 @@ func (h *ShopHandler) List(w http.ResponseWriter, r *http.Request) {
 	if clinic == "" {
 		clinic = claims.Zip
 	}
-	query = query.Where("sk = ?", clinic)
+	// Raw column name — the shop table's clinic column is `zip`.
+	query = query.Where("zip = ?", clinic)
 
 	if dateFrom := r.URL.Query().Get("date_from"); dateFrom != "" {
 		query = query.Where("date >= ?", dateFrom)
@@ -109,12 +123,16 @@ func (h *ShopHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Same "card"/"cash" → Georgian translation as payments; the two
+	// tables share the `pay` vocabulary and the clinic reports union
+	// across them.
 	sale := models.Shop{
 		Name:    req.Name,
 		Price:   req.Price,
 		Date:    req.Date,
 		SK:      claims.Zip,
-		VetName: formatUint(claims.UserID),
+		Method:  models.NormalizePayMethod(req.Method),
+		Comment: req.Comment,
 	}
 
 	if err := h.db.Create(&sale).Error; err != nil {

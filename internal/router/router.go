@@ -2,6 +2,8 @@ package router
 
 import (
 	"net/http"
+	"os"
+	"strings"
 
 	"vetapp-backend/internal/handlers"
 	"vetapp-backend/internal/middleware"
@@ -16,6 +18,30 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"gorm.io/gorm"
 )
+
+// allowedOrigins reads CORS_ORIGINS as a comma-separated list. Falls
+// back to localhost dev origins when unset so local Next.js + Expo
+// development continues to work without setup. Production must set the
+// env var explicitly — wildcard + AllowCredentials is invalid per the
+// CORS spec, and lying to browsers about it produces silent failures.
+func allowedOrigins() []string {
+	raw := strings.TrimSpace(os.Getenv("CORS_ORIGINS"))
+	if raw == "" {
+		return []string{
+			"http://localhost:3000",
+			"http://localhost:8081",
+			"http://localhost:19006",
+		}
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
 
 // Setup creates and configures the Chi router with all routes.
 //
@@ -35,7 +61,7 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 	r.Use(chimw.Recoverer)
 	r.Use(middleware.Logger)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   allowedOrigins(),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		ExposedHeaders:   []string{"Link"},
@@ -89,6 +115,23 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 		// success/failure rather than JSON so the user sees something
 		// readable directly in their browser.
 		r.Get("/email/verify/confirm", authHandler.ConfirmEmailVerification)
+
+		// Authenticated auth routes must live inside THIS subrouter.
+		// Chi resolves a request against the first subrouter mounted at
+		// a matching prefix: with /api/auth mounted here, a request to
+		// /api/auth/me never reaches the r.Route("/api", ...) block
+		// below, so registering them there made them permanently 404
+		// regardless of the token supplied.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.Auth(authService))
+			r.Get("/me", authHandler.Me)
+			r.Put("/me", authHandler.UpdateMe)
+			// In-app password rotation (settings → security → change
+			// password). Distinct from the public /auth/password-reset,
+			// which is the "I forgot my password" OTP recovery flow.
+			r.Post("/change-password", authHandler.ChangePassword)
+			r.Post("/email/verify/send", authHandler.SendEmailVerification)
+		})
 	})
 
 	// Subscription packages (public), callback (public webhook)
@@ -104,14 +147,9 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 	r.Route("/api", func(r chi.Router) {
 		r.Use(middleware.Auth(authService))
 
-		// Auth - authenticated
-		r.Get("/auth/me", authHandler.Me)
-		r.Put("/auth/me", authHandler.UpdateMe)
-		// In-app password rotation (settings → security → change password).
-		// Distinct from the public /auth/password-reset, which is the
-		// "I forgot my password" OTP recovery flow.
-		r.Post("/auth/change-password", authHandler.ChangePassword)
-		r.Post("/auth/email/verify/send", authHandler.SendEmailVerification)
+		// Auth - authenticated routes are registered on the /api/auth
+		// subrouter above (see the comment there); mounting them here
+		// would be shadowed by it.
 
 		// Pets - vet/admin only
 		r.Route("/pets", func(r chi.Router) {
