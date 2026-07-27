@@ -52,7 +52,11 @@ func allowedOrigins() []string {
 // `emailVerifyBaseURL` is the absolute URL prefix the email-verification
 // link in outgoing emails points back to. Pass cfg.EmailVerifyBaseURL
 // or fall back to baseURL when empty.
-func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.SMSService, emailService *services.EmailService, ipayService *services.IPayService, baseURL, emailVerifyBaseURL string) *chi.Mux {
+// `bogService` may be nil or unconfigured; NewSubscriptionHandler then
+// falls back to the legacy iPay gateway rather than failing checkouts.
+// `paymentProvider` selects which gateway NEW checkouts use ("bog" or
+// "ipay") — see config.PaymentProvider.
+func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.SMSService, emailService *services.EmailService, ipayService *services.IPayService, bogService *services.BOGService, paymentProvider, baseURL, emailVerifyBaseURL string) *chi.Mux {
 	r := chi.NewRouter()
 
 	// --- Global middleware ---
@@ -89,7 +93,7 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 	shopHandler := handlers.NewShopHandler(db)
 	staffHandler := handlers.NewStaffHandler(db, authService)
 	ownerPortalHandler := handlers.NewOwnerPortalHandler(db)
-	subHandler := handlers.NewSubscriptionHandler(db, ipayService, baseURL)
+	subHandler := handlers.NewSubscriptionHandler(db, ipayService, bogService, paymentProvider, baseURL)
 	notifHandler := handlers.NewNotificationHandler(db, smsService)
 	publicHandler := handlers.NewPublicHandler(db)
 

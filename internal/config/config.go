@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -46,12 +47,35 @@ type Config struct {
 	// Falls back to BaseURL when unset.
 	EmailVerifyBaseURL string
 
-	// iPay.ge
+	// iPay.ge — Bank of Georgia's LEGACY gateway. BOG's own docs mark
+	// it deprecated ("Ipay integration is no longer available"), so it
+	// is kept only to settle in-flight orders and as a fallback for
+	// deployments that have no BOG credentials yet.
 	IPayClientID  string
 	IPaySecretKey string
 	IPayURL       string
 
-	// Public base URL (for iPay callback etc.)
+	// Bank of Georgia Payments API (api.bog.ge) — the current
+	// generation of the same bank's gateway. Obtain client_id /
+	// client_secret from https://businessmanager.bog.ge.
+	//
+	// BOGPublicKey is BOG's RSA public key in PEM form, used to verify
+	// the `Callback-Signature` webhook header. Optional: when unset,
+	// callbacks are treated as unverified hints and the authoritative
+	// status is re-fetched from the API instead (see BOGService).
+	BOGClientID  string
+	BOGSecretKey string
+	BOGAPIURL    string
+	BOGAuthURL   string
+	BOGPublicKey string
+
+	// PaymentProvider selects the card gateway used for NEW checkouts:
+	// "bog" (current) or "ipay" (legacy). Defaults to "bog" whenever
+	// BOG credentials are present so a configured deployment doesn't
+	// silently keep using the deprecated gateway.
+	PaymentProvider string
+
+	// Public base URL (for payment callbacks etc.)
 	BaseURL string
 }
 
@@ -82,9 +106,26 @@ func Load() (*Config, error) {
 		ResendFrom:         getEnv("RESEND_FROM", "VetApp <onboarding@resend.dev>"),
 		EmailVerifyBaseURL: getEnv("EMAIL_VERIFY_BASE_URL", ""),
 		IPayClientID:       getEnv("IPAY_CLIENT_ID", ""),
-		IPaySecretKey:    getEnv("IPAY_SECRET_KEY", ""),
-		IPayURL:          ipayURL(),
-		BaseURL:          getEnv("BASE_URL", "http://localhost:8080"),
+		IPaySecretKey:      getEnv("IPAY_SECRET_KEY", ""),
+		IPayURL:            ipayURL(),
+		BOGClientID:        getEnv("BOG_CLIENT_ID", ""),
+		BOGSecretKey:       getEnv("BOG_SECRET_KEY", ""),
+		BOGAPIURL:          getEnv("BOG_API_URL", "https://api.bog.ge"),
+		BOGAuthURL:         getEnv("BOG_AUTH_URL", "https://oauth2.bog.ge"),
+		BOGPublicKey:       getEnv("BOG_PUBLIC_KEY", ""),
+		BaseURL:            getEnv("BASE_URL", "http://localhost:8080"),
+	}
+
+	// Resolve the active card gateway. Explicit PAYMENT_PROVIDER wins;
+	// otherwise prefer BOG when its credentials exist, and only fall
+	// back to the deprecated iPay gateway when they don't.
+	cfg.PaymentProvider = strings.ToLower(strings.TrimSpace(getEnv("PAYMENT_PROVIDER", "")))
+	if cfg.PaymentProvider == "" {
+		if cfg.BOGClientID != "" && cfg.BOGSecretKey != "" {
+			cfg.PaymentProvider = "bog"
+		} else {
+			cfg.PaymentProvider = "ipay"
+		}
 	}
 
 	// Validate required fields

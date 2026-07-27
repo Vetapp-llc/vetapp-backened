@@ -58,9 +58,10 @@ func main() {
 	// rather than 5xx so the mobile UI shows the friendly fallback.
 	emailService := services.NewEmailService(cfg)
 	ipayService := services.NewIPayService(cfg)
+	bogService := services.NewBOGService(cfg)
 
 	// Setup router with all routes
-	r := router.Setup(db, authService, smsService, emailService, ipayService, cfg.BaseURL, cfg.EmailVerifyBaseURL)
+	r := router.Setup(db, authService, smsService, emailService, ipayService, bogService, cfg.PaymentProvider, cfg.BaseURL, cfg.EmailVerifyBaseURL)
 
 	// Start server
 	addr := ":" + cfg.Port
