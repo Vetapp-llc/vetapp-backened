@@ -1,13 +1,57 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"sync"
+	"sync/atomic"
 
 	"vetapp-backend/internal/services"
 
+	"golang.org/x/sync/semaphore"
 	"gorm.io/gorm"
 )
+
+// smsConcurrency caps how many SMS sends we do in parallel. 10 is
+// conservative — SMSOffice can handle more, but this protects our own
+// goroutines + the database connection pool when the cron fires for a
+// clinic with hundreds of pets.
+const smsConcurrency = 10
+
+// dispatchSMSBatch fans out an SMS send across `messages` with a
+// bounded-concurrency worker pool. Returns (sent, errors).
+//
+// Without this, the cron job sent SMS strictly sequentially —
+// 200 reminders × ~1s upstream latency = ~3 minutes blocked. With
+// concurrency 10 the same batch finishes in ~20s.
+func dispatchSMSBatch(svc *services.SMSService, messages []struct{ Phone, Body string }) (int32, int32) {
+	if len(messages) == 0 {
+		return 0, 0
+	}
+	ctx := context.Background()
+	sem := semaphore.NewWeighted(smsConcurrency)
+	var sent, errs int32
+	var wg sync.WaitGroup
+	for _, m := range messages {
+		if err := sem.Acquire(ctx, 1); err != nil {
+			atomic.AddInt32(&errs, 1)
+			continue
+		}
+		wg.Add(1)
+		go func(phone, body string) {
+			defer wg.Done()
+			defer sem.Release(1)
+			if err := svc.Send(phone, body); err != nil {
+				atomic.AddInt32(&errs, 1)
+				return
+			}
+			atomic.AddInt32(&sent, 1)
+		}(m.Phone, m.Body)
+	}
+	wg.Wait()
+	return sent, errs
+}
 
 // NotificationHandler handles SMS notification endpoints.
 type NotificationHandler struct {
@@ -42,28 +86,28 @@ type ReminderResult struct {
 // @Router /notifications/sms/reminders [post]
 func (h *NotificationHandler) SendReminders(w http.ResponseWriter, r *http.Request) {
 	var result ReminderResult
+	type sms struct{ Phone, Body string }
 
-	// 1. Expired packages: pets where birth2 = today
 	type phoneRow struct {
 		Phone string
 		Name  string
 	}
 
+	// 1. Expired packages
 	var expired []phoneRow
 	h.db.Raw(`SELECT p.phone, p.name FROM pets p
 		WHERE p.birth2 = CURRENT_DATE::text
 		AND TRIM(COALESCE(p.phone,'')) != ''`).Scan(&expired)
 
+	expiredMsgs := make([]sms, 0, len(expired))
 	for _, row := range expired {
-		msg := fmt.Sprintf("VetApp: %s-ს პაკეტი ამოიწურა. გთხოვთ განაახლოთ.", row.Name)
-		if err := h.smsService.Send(row.Phone, msg); err != nil {
-			result.Errors++
-		} else {
-			result.Expired++
-		}
+		expiredMsgs = append(expiredMsgs, sms{
+			Phone: row.Phone,
+			Body:  fmt.Sprintf("VetApp: %s-ს პაკეტი ამოიწურა. გთხოვთ განაახლოთ.", row.Name),
+		})
 	}
 
-	// 2. Birthday greetings: pets where happy = today's MM-DD, active subscription
+	// 2. Birthdays
 	var birthdays []phoneRow
 	h.db.Raw(`SELECT p.phone, p.name FROM pets p
 		WHERE SUBSTRING(p.happy FROM 6) = TO_CHAR(CURRENT_DATE, 'MM-DD')
@@ -71,16 +115,15 @@ func (h *NotificationHandler) SendReminders(w http.ResponseWriter, r *http.Reque
 		AND p.birth2 >= CURRENT_DATE::text
 		AND TRIM(COALESCE(p.phone,'')) != ''`).Scan(&birthdays)
 
+	birthdayMsgs := make([]sms, 0, len(birthdays))
 	for _, row := range birthdays {
-		msg := fmt.Sprintf("VetApp: გილოცავთ %s-ს დაბადების დღეს! 🎂", row.Name)
-		if err := h.smsService.Send(row.Phone, msg); err != nil {
-			result.Errors++
-		} else {
-			result.Birthdays++
-		}
+		birthdayMsgs = append(birthdayMsgs, sms{
+			Phone: row.Phone,
+			Body:  fmt.Sprintf("VetApp: გილოცავთ %s-ს დაბადების დღეს! 🎂", row.Name),
+		})
 	}
 
-	// 3. Procedure reminders: vaccinations due in 3 days for active pets
+	// 3. Procedure reminders (3 days out)
 	var reminders []struct {
 		Phone  string
 		Name   string
@@ -95,14 +138,31 @@ func (h *NotificationHandler) SendReminders(w http.ResponseWriter, r *http.Reque
 		AND p.birth2 >= CURRENT_DATE::text
 		AND TRIM(COALESCE(p.phone,'')) != ''`).Scan(&reminders)
 
+	reminderMsgs := make([]sms, 0, len(reminders))
 	for _, row := range reminders {
-		msg := fmt.Sprintf("VetApp: %s-ს %s 3 დღეში ესაჭიროება. გთხოვთ დაგვიკავშირდეთ.", row.Name, row.TPName)
-		if err := h.smsService.Send(row.Phone, msg); err != nil {
-			result.Errors++
-		} else {
-			result.Procedures++
-		}
+		reminderMsgs = append(reminderMsgs, sms{
+			Phone: row.Phone,
+			Body:  fmt.Sprintf("VetApp: %s-ს %s 3 დღეში ესაჭიროება. გთხოვთ დაგვიკავშირდეთ.", row.Name, row.TPName),
+		})
 	}
+
+	// Fan out — sends in parallel within the per-batch concurrency cap.
+	// dispatchSMSBatch's signature uses a struct type with the same shape.
+	convert := func(in []sms) []struct{ Phone, Body string } {
+		out := make([]struct{ Phone, Body string }, len(in))
+		for i, m := range in {
+			out[i] = struct{ Phone, Body string }{Phone: m.Phone, Body: m.Body}
+		}
+		return out
+	}
+	sentE, errE := dispatchSMSBatch(h.smsService, convert(expiredMsgs))
+	sentB, errB := dispatchSMSBatch(h.smsService, convert(birthdayMsgs))
+	sentP, errP := dispatchSMSBatch(h.smsService, convert(reminderMsgs))
+
+	result.Expired = int(sentE)
+	result.Birthdays = int(sentB)
+	result.Procedures = int(sentP)
+	result.Errors = int(errE + errB + errP)
 
 	writeJSON(w, http.StatusOK, result)
 }

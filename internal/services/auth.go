@@ -2,6 +2,7 @@ package services
 
 import (
 	"crypto/aes"
+	"crypto/subtle"
 	"fmt"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"vetapp-backend/internal/models"
 
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // AuthService handles JWT tokens and AES password encryption.
@@ -31,6 +33,12 @@ type TokenPair struct {
 
 // Claims are the JWT payload fields.
 // Field names match what the Next.js frontend expects when decoding the token.
+//
+// `LastName` historically holds the Georgian personal ID, not a surname
+// (the legacy `memberlogin_members.last_name` column was reused for it
+// — see models/user.go). New backend code should call `PersonalID()` so
+// the intent is obvious and the JSON shape can later be split without
+// touching every call site.
 type Claims struct {
 	UserID      uint   `json:"user_id"`
 	GroupID     int    `json:"group_id"`
@@ -40,6 +48,17 @@ type Claims struct {
 	LastName    string `json:"last_name"`
 	CompanyName string `json:"company_name"`
 	jwt.RegisteredClaims
+}
+
+// PersonalID returns the user's Georgian personal ID, which is stored
+// in the `last_name` column / claim for legacy reasons. Prefer this
+// over reading `claims.LastName` directly so future renames don't have
+// to touch every ownership check.
+func (c *Claims) PersonalID() string {
+	if c == nil {
+		return ""
+	}
+	return c.LastName
 }
 
 // GenerateTokenPair creates a new access + refresh token pair for the user.
@@ -112,8 +131,7 @@ func (s *AuthService) parseToken(tokenStr, secret string) (*Claims, error) {
 	return claims, nil
 }
 
-// --- AES Password Encryption ---
-// --- AES Password Encryption ---
+// --- AES Password Encryption (legacy) ---
 // Passwords in Supabase are encrypted with AES-128-ECB using MySQL-style key derivation
 // (XOR-fold the salt into 16 bytes). Padding is PKCS7.
 // Salt for Supabase: DW3Z07FI (different from PHP/MySQL which uses RZ8HU1EB).
@@ -171,6 +189,37 @@ func (s *AuthService) DecryptPassword(encrypted []byte) (string, error) {
 	}
 
 	return string(unpadded), nil
+}
+
+// --- bcrypt (preferred password storage) ---
+
+// HashPassword returns a bcrypt hash suitable for storage in the
+// memberlogin_members.password_hash column. Cost 12 ≈ 250 ms on a
+// modest server — slow enough to deter brute force, fast enough that
+// a synchronous login still feels responsive.
+func (s *AuthService) HashPassword(plaintext string) (string, error) {
+	h, err := bcrypt.GenerateFromPassword([]byte(plaintext), 12)
+	if err != nil {
+		return "", fmt.Errorf("hash password: %w", err)
+	}
+	return string(h), nil
+}
+
+// VerifyBcrypt returns true iff the bcrypt hash matches the plaintext.
+// Constant-time by construction (bcrypt internals).
+func (s *AuthService) VerifyBcrypt(hash, plaintext string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(plaintext)) == nil
+}
+
+// VerifyLegacyAES decrypts an AES-stored password and compares it to
+// `plaintext` in constant time. Used during the dual-read migration
+// window for users whose password_hash is still empty.
+func (s *AuthService) VerifyLegacyAES(encrypted []byte, plaintext string) bool {
+	stored, err := s.DecryptPassword(encrypted)
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(stored), []byte(plaintext)) == 1
 }
 
 // pkcs7Pad pads data to a multiple of blockSize using PKCS7.

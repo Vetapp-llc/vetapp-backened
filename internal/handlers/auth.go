@@ -3,9 +3,10 @@ package handlers
 import (
 	cryptorand "crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -16,6 +17,39 @@ import (
 
 	"gorm.io/gorm"
 )
+
+// otpSendLimiter caps OTP-send requests per phone to deter SMS-pump
+// abuse (we pay per SMS) and basic brute force preparation.
+//   - Burst window: 60s, max 1 send per phone.
+//   - Daily window: 24h, max 5 sends per phone.
+// Two limiters cover both rules; the stricter one wins.
+var (
+	otpSendBurstLimiter = middleware.NewRateLimiter(1, 60*time.Second)
+	otpSendDailyLimiter = middleware.NewRateLimiter(5, 24*time.Hour)
+	// otpVerifyLimiter caps verify attempts per OTP ID across the whole
+	// process — per-row `tries` already handles per-OTP brute force,
+	// this catches enumeration of OTPIDs.
+	otpVerifyLimiter = middleware.NewRateLimiter(20, time.Minute)
+)
+
+// numericCode returns a zero-padded n-digit numeric code generated
+// from crypto/rand. We avoid math/rand here because OTPs are a
+// security primitive and a predictable seed is unacceptable.
+func numericCode(digits int) (string, error) {
+	if digits <= 0 || digits > 12 {
+		return "", fmt.Errorf("invalid digits: %d", digits)
+	}
+	var b [8]byte
+	if _, err := cryptorand.Read(b[:]); err != nil {
+		return "", err
+	}
+	n := binary.BigEndian.Uint64(b[:])
+	mod := uint64(1)
+	for i := 0; i < digits; i++ {
+		mod *= 10
+	}
+	return fmt.Sprintf("%0*d", digits, n%mod), nil
+}
 
 // AuthHandler handles authentication endpoints.
 type AuthHandler struct {
@@ -94,6 +128,30 @@ type UserResponse struct {
 	PhoneVerified bool   `json:"phone_verified"`
 }
 
+// toUserResponse projects the full User model down to the public
+// `UserResponse` shape returned by /auth/me. Centralised so the JSON
+// contract stays in one place — without it, callers `writeJSON(user)`
+// directly and quietly leak password_hash, last_login, etc., and the
+// Swagger doc drifts from reality.
+func toUserResponse(u models.User) UserResponse {
+	return UserResponse{
+		ID:            u.ID,
+		FirstName:     u.FirstName,
+		LastName:      u.LastName,
+		Email:         u.Email,
+		Phone:         u.Phone,
+		Address:       u.Address,
+		City:          u.City,
+		CountryID:     u.CountryID,
+		Zip:           u.Zip,
+		GroupID:       u.GroupID,
+		CompanyName:   u.CompanyName,
+		Status:        u.Status,
+		EmailVerified: u.EmailVerified,
+		PhoneVerified: u.PhoneVerified,
+	}
+}
+
 // --- Handlers ---
 
 // Login authenticates a user with email + password.
@@ -123,15 +181,23 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decrypt stored password and compare (MySQL AES_ENCRYPT format)
-	storedPassword, err := h.authService.DecryptPassword(user.Password)
-	if err != nil {
-		log.Error("login_failed", "email", req.Email, "reason", "decrypt_error", "error", err)
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "authentication error"})
-		return
+	// Verify password — prefer bcrypt, fall back to legacy AES.
+	// On a successful AES verification, backfill bcrypt so this user
+	// migrates off the reversible scheme on their next login.
+	authed := false
+	if user.PasswordHash != "" && h.authService.VerifyBcrypt(user.PasswordHash, req.Password) {
+		authed = true
+	} else if len(user.Password) > 0 && h.authService.VerifyLegacyAES(user.Password, req.Password) {
+		authed = true
+		if hash, err := h.authService.HashPassword(req.Password); err == nil {
+			if err := h.db.Model(&user).Update("password_hash", hash).Error; err != nil {
+				log.Warn("login_bcrypt_backfill_failed", "user_id", user.ID, "error", err)
+			}
+		}
 	}
-
-	if storedPassword != req.Password {
+	if !authed {
+		// Generic 401 — never distinguish "user has corrupt ciphertext"
+		// or "wrong password" so attackers can't enumerate accounts.
 		log.Warn("login_failed", "email", req.Email, "reason", "invalid_password")
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid credentials"})
 		return
@@ -184,7 +250,15 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Encrypt password (MySQL AES_ENCRYPT compatible)
+	// Bcrypt is the source of truth going forward. We still write the
+	// AES column so that any out-of-band reader (admin tooling) keeps
+	// working during the migration window.
+	hash, err := h.authService.HashPassword(req.Password)
+	if err != nil {
+		log.Error("register_failed", "email", req.Email, "reason", "hash_error", "error", err)
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to hash password"})
+		return
+	}
 	encryptedBytes, err := h.authService.EncryptPassword(req.Password)
 	if err != nil {
 		log.Error("register_failed", "email", req.Email, "reason", "encrypt_error", "error", err)
@@ -199,14 +273,15 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := models.User{
-		FirstName: req.FirstName,
-		LastName:  req.LastName,
-		Email:     req.Email,
-		Phone:     req.Phone,
-		Password:  encryptedBytes,
-		GroupID:   groupID,
-		Zip:       req.Zip,
-		Status:    "T",
+		FirstName:    req.FirstName,
+		LastName:     req.LastName,
+		Email:        req.Email,
+		Phone:        req.Phone,
+		Password:     encryptedBytes,
+		PasswordHash: hash,
+		GroupID:      groupID,
+		Zip:          req.Zip,
+		Status:       "T",
 	}
 
 	if err := h.db.Create(&user).Error; err != nil {
@@ -289,19 +364,24 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 // @Failure 404 {object} ErrorResponse
 // @Router /auth/me [get]
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
+	log := middleware.RequestLogger(r)
+
 	claims := middleware.GetClaims(r)
 	if claims == nil {
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "unauthorized"})
 		return
 	}
 
+	log.Info("me_lookup", "user_id", claims.UserID, "email", claims.Email)
+
 	var user models.User
-	if err := h.db.First(&user, claims.UserID).Error; err != nil {
+	if err := h.db.Where("id = ?", claims.UserID).First(&user).Error; err != nil {
+		log.Warn("me_user_not_found", "user_id", claims.UserID, "error", err)
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "user not found"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, user)
+	writeJSON(w, http.StatusOK, toUserResponse(user))
 }
 
 // UpdateMeRequest is the payload for updating the current user's profile.
@@ -388,7 +468,7 @@ func (h *AuthHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	// Re-read so the response reflects the row exactly as it now lives
 	// in the DB (defaults, triggers, etc.).
 	h.db.First(&user, claims.UserID)
-	writeJSON(w, http.StatusOK, user)
+	writeJSON(w, http.StatusOK, toUserResponse(user))
 }
 
 // ChangePasswordRequest is the request body for changing the
@@ -471,18 +551,25 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	current, err := h.authService.DecryptPassword(user.Password)
-	if err != nil {
-		log.Error("change_password_failed", "user_id", user.ID, "reason", "decrypt_error", "error", err)
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "authentication error"})
-		return
+	// Verify current password using the same dual-read order as Login.
+	currentOK := false
+	if user.PasswordHash != "" && h.authService.VerifyBcrypt(user.PasswordHash, req.CurrentPassword) {
+		currentOK = true
+	} else if len(user.Password) > 0 && h.authService.VerifyLegacyAES(user.Password, req.CurrentPassword) {
+		currentOK = true
 	}
-	if current != req.CurrentPassword {
+	if !currentOK {
 		log.Warn("change_password_failed", "user_id", user.ID, "reason", "invalid_current_password")
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "current password is incorrect"})
 		return
 	}
 
+	newHash, err := h.authService.HashPassword(req.NewPassword)
+	if err != nil {
+		log.Error("change_password_failed", "user_id", user.ID, "reason", "hash_error", "error", err)
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "could not hash new password"})
+		return
+	}
 	encrypted, err := h.authService.EncryptPassword(req.NewPassword)
 	if err != nil {
 		log.Error("change_password_failed", "user_id", user.ID, "reason", "encrypt_error", "error", err)
@@ -490,7 +577,10 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.Model(&user).Update("password", encrypted).Error; err != nil {
+	if err := h.db.Model(&user).Updates(map[string]interface{}{
+		"password":      encrypted,
+		"password_hash": newHash,
+	}).Error; err != nil {
 		log.Error("change_password_failed", "user_id", user.ID, "reason", "db_error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "could not update password"})
 		return
@@ -680,9 +770,13 @@ func (h *AuthHandler) ConfirmEmailVerification(w http.ResponseWriter, r *http.Re
 	// crash mid-operation can't leave us with a verified user and an
 	// unconsumed token (or vice versa).
 	err := h.db.Transaction(func(tx *gorm.DB) error {
+		// Use the Go field name so GORM resolves the `gorm:"column:emailVerified"`
+		// tag from the User model — passing the raw column name would
+		// generate `SET emailVerified = ?` which Postgres lower-cases
+		// unless quoted, silently updating zero rows.
 		if err := tx.Model(&models.User{}).
 			Where("id = ?", token.UserID).
-			Update("emailVerified", true).Error; err != nil {
+			UpdateColumn("EmailVerified", true).Error; err != nil {
 			return err
 		}
 		now := time.Now()
@@ -869,8 +963,26 @@ func (h *AuthHandler) OTPSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate 4-digit code
-	code := fmt.Sprintf("%04d", rand.Intn(9000)+1000)
+	// Per-phone send rate-limit. Both windows must allow.
+	if !otpSendBurstLimiter.Allow(req.Phone) {
+		log.Warn("otp_send_rate_limited", "phone", req.Phone, "reason", "burst")
+		writeJSON(w, http.StatusTooManyRequests, ErrorResponse{Error: "please wait before requesting another code"})
+		return
+	}
+	if !otpSendDailyLimiter.Allow(req.Phone) {
+		log.Warn("otp_send_rate_limited", "phone", req.Phone, "reason", "daily_cap")
+		writeJSON(w, http.StatusTooManyRequests, ErrorResponse{Error: "daily OTP limit reached"})
+		return
+	}
+
+	// 6-digit code from crypto/rand. The 4-digit code we used to
+	// generate had only 10⁴ entropy, brute-forceable inside the 60s TTL.
+	code, err := numericCode(6)
+	if err != nil {
+		log.Error("otp_send_failed", "reason", "rand", "error", err)
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to generate code"})
+		return
+	}
 
 	otp := models.OTP{
 		Phone:     req.Phone,
@@ -918,6 +1030,13 @@ func (h *AuthHandler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Whole-process verify rate limit (catches OTPID enumeration).
+	if !otpVerifyLimiter.Allow(fmt.Sprintf("%d", req.OTPID)) {
+		log.Warn("otp_verify_rate_limited", "otp_id", req.OTPID)
+		writeJSON(w, http.StatusTooManyRequests, ErrorResponse{Error: "too many attempts"})
+		return
+	}
+
 	var otp models.OTP
 	if err := h.db.First(&otp, req.OTPID).Error; err != nil {
 		log.Warn("otp_verify_failed", "otp_id", req.OTPID, "reason", "not_found")
@@ -925,14 +1044,17 @@ func (h *AuthHandler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if otp.Used || time.Now().After(otp.ExpiresAt) {
-		log.Warn("otp_verify_failed", "otp_id", req.OTPID, "reason", "expired_or_used")
+	const maxTries = 5
+	if otp.Used || time.Now().After(otp.ExpiresAt) || otp.Tries >= maxTries {
+		log.Warn("otp_verify_failed", "otp_id", req.OTPID, "reason", "expired_used_or_locked")
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "OTP expired or already used"})
 		return
 	}
 
 	if otp.Code != req.Code {
-		log.Warn("otp_verify_failed", "otp_id", req.OTPID, "reason", "wrong_code")
+		// Increment the wrong-code counter so we lock after maxTries.
+		h.db.Model(&otp).UpdateColumn("tries", gorm.Expr("tries + 1"))
+		log.Warn("otp_verify_failed", "otp_id", req.OTPID, "reason", "wrong_code", "tries", otp.Tries+1)
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid code"})
 		return
 	}
@@ -974,8 +1096,15 @@ func (h *AuthHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if otp.Used || time.Now().After(otp.ExpiresAt) || otp.Code != req.OTPCode {
-		log.Warn("password_reset_failed", "otp_id", req.OTPID, "reason", "otp_invalid")
+	const maxTries = 5
+	if otp.Used || time.Now().After(otp.ExpiresAt) || otp.Tries >= maxTries {
+		log.Warn("password_reset_failed", "otp_id", req.OTPID, "reason", "otp_locked_or_expired")
+		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid or expired OTP"})
+		return
+	}
+	if otp.Code != req.OTPCode {
+		h.db.Model(&otp).UpdateColumn("tries", gorm.Expr("tries + 1"))
+		log.Warn("password_reset_failed", "otp_id", req.OTPID, "reason", "otp_wrong_code")
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid or expired OTP"})
 		return
 	}
@@ -988,7 +1117,13 @@ func (h *AuthHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Encrypt new password
+	// Bcrypt is preferred; AES is dual-written for migration-window safety.
+	newHash, err := h.authService.HashPassword(req.NewPassword)
+	if err != nil {
+		log.Error("password_reset_failed", "user_id", user.ID, "reason", "hash_error", "error", err)
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to hash password"})
+		return
+	}
 	encrypted, err := h.authService.EncryptPassword(req.NewPassword)
 	if err != nil {
 		log.Error("password_reset_failed", "user_id", user.ID, "reason", "encrypt_error", "error", err)
@@ -996,7 +1131,10 @@ func (h *AuthHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.Model(&user).Update("password", encrypted).Error; err != nil {
+	if err := h.db.Model(&user).Updates(map[string]interface{}{
+		"password":      encrypted,
+		"password_hash": newHash,
+	}).Error; err != nil {
 		log.Error("password_reset_failed", "user_id", user.ID, "reason", "db_error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to update password"})
 		return
@@ -1012,9 +1150,13 @@ func (h *AuthHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 
 // --- Helpers ---
 
-// writeJSON writes a JSON response with the given status code.
+// writeJSON writes a JSON response with the given status code. Encode
+// errors fire after the header has been written, so we can't recover —
+// just log so the failure isn't silent.
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		slog.Warn("writejson_encode_failed", "status", status, "error", err)
+	}
 }

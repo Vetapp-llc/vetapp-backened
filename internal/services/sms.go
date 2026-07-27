@@ -5,18 +5,25 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"vetapp-backend/internal/config"
 )
 
 // SMSService handles sending SMS via smsoffice.ge API.
 type SMSService struct {
-	cfg *config.Config
+	cfg    *config.Config
+	client *http.Client
 }
 
 // NewSMSService creates a new SMSService.
 func NewSMSService(cfg *config.Config) *SMSService {
-	return &SMSService{cfg: cfg}
+	return &SMSService{
+		cfg: cfg,
+		// 5s upper bound — if SMS Office is hung the request goroutine
+		// (and any DB connection it holds) shouldn't block forever.
+		client: &http.Client{Timeout: 5 * time.Second},
+	}
 }
 
 // Send sends an SMS message to the given phone number.
@@ -28,7 +35,7 @@ func (s *SMSService) Send(phone, message string) error {
 		"content":     {message},
 	}
 
-	resp, err := http.Get(s.cfg.SMSURL + "?" + params.Encode())
+	resp, err := s.client.Get(s.cfg.SMSURL + "?" + params.Encode())
 	if err != nil {
 		return fmt.Errorf("sms request failed: %w", err)
 	}

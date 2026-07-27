@@ -198,6 +198,9 @@ func (h *PublicHandler) GetPetProcedures(w http.ResponseWriter, r *http.Request)
 }
 
 // writePetProfile builds and writes the public pet profile response.
+// Category counts are produced by the shared `buildPetCategories`
+// helper (parallel queries, single source of truth for the tp=999
+// allergy bucket convention).
 func (h *PublicHandler) writePetProfile(w http.ResponseWriter, pet models.Pet) {
 	petID := strconv.Itoa(int(pet.ID))
 
@@ -215,47 +218,8 @@ func (h *PublicHandler) writePetProfile(w http.ResponseWriter, pet models.Pet) {
 		info.Birth = &pet.Date
 	}
 
-	// Count procedures by type
-	type tpCount struct {
-		TP    int
-		Count int
-	}
-	var counts []tpCount
-	h.db.Model(&models.Procedure{}).
-		Select("tp as tp, COUNT(*) as count").
-		Where("uuid = ?", petID).
-		Group("tp").
-		Scan(&counts)
-
-	// Count allergies
-	var allergyCount int64
-	h.db.Model(&models.Allergy{}).Where("uuid = ?", petID).Count(&allergyCount)
-
-	// Build categories — include all types that have records
-	categories := make([]ProcedureCategoryCount, 0, len(counts)+1)
-	for _, c := range counts {
-		name := procedureTypeNames[c.TP]
-		if name == "" {
-			name = "სხვა"
-		}
-		categories = append(categories, ProcedureCategoryCount{
-			TP:    c.TP,
-			Name:  name,
-			Count: c.Count,
-		})
-	}
-
-	// Add allergies if any
-	if allergyCount > 0 {
-		categories = append(categories, ProcedureCategoryCount{
-			TP:    999,
-			Name:  "ალერგია / დაავადება",
-			Count: int(allergyCount),
-		})
-	}
-
 	writeJSON(w, http.StatusOK, PublicPetResponse{
 		Pet:        info,
-		Categories: categories,
+		Categories: buildPetCategories(h.db, petID),
 	})
 }

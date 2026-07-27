@@ -2,13 +2,18 @@
 .env
 *.txt
 
-# Binaries
+# Binaries (built from cmd/<name>/main.go)
 bin/
 tmp/
 /server
 /sync
 /verify
 /paystats
+/brcleanup
+/migrationaudit
+/orphantpmigrate
+/stats
+/sterilmigrate
 
 
 # IDE

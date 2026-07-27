@@ -10,6 +10,7 @@ import (
 	"errors"
 	"math/big"
 	"strings"
+	"sync"
 )
 
 // AppleRootCAPEM is Apple's Root CA - G3 certificate in PEM format.
@@ -29,6 +30,34 @@ MGUCMQCD6cHEFl4aXTQY2e3v9GwOAEZLuN+yRhHFD/3meoyhpmvOwgPUnPWTxnS4
 at+qIxUCMG1mihDK1A3UT82NQz60imOlM27jbdoXt2QfyFMm+YhidDkLF1vLUagM
 6BgD56KyKA==
 -----END CERTIFICATE-----`
+
+// appleRootPool caches the parsed Apple Root CA G3 pool — built once
+// on first verify and reused. Lazy (rather than init-time) so that a
+// PEM/parse problem surfaces as a per-receipt error instead of a
+// process panic at boot, which would hold up every other endpoint too.
+var (
+	appleRootPool   *x509.CertPool
+	appleRootOnce   sync.Once
+	appleRootErr    error
+)
+
+func getAppleRootPool() (*x509.CertPool, error) {
+	appleRootOnce.Do(func() {
+		block, _ := pem.Decode([]byte(AppleRootCAPEM))
+		if block == nil {
+			appleRootErr = errors.New("apple_iap: failed to decode embedded Root CA PEM")
+			return
+		}
+		root, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			appleRootErr = errors.New("apple_iap: failed to parse embedded Root CA: " + err.Error())
+			return
+		}
+		appleRootPool = x509.NewCertPool()
+		appleRootPool.AddCert(root)
+	})
+	return appleRootPool, appleRootErr
+}
 
 // AppleTransactionInfo contains the decoded fields from a StoreKit 2 signed transaction.
 type AppleTransactionInfo struct {
@@ -97,20 +126,12 @@ func VerifyAppleJWS(signedTransaction string) (*AppleTransactionInfo, error) {
 		certs[i] = cert
 	}
 
-	// Parse Apple Root CA
-	block, _ := pem.Decode([]byte(AppleRootCAPEM))
-	if block == nil {
-		return nil, errors.New("failed to decode Apple Root CA PEM")
-	}
-	appleRoot, err := x509.ParseCertificate(block.Bytes)
+	// Build the intermediate pool from the receipt's x5c chain. The
+	// root pool is lazily parsed on first call and cached.
+	rootPool, err := getAppleRootPool()
 	if err != nil {
-		return nil, errors.New("failed to parse Apple Root CA")
+		return nil, err
 	}
-
-	// Build certificate pool and verify chain
-	rootPool := x509.NewCertPool()
-	rootPool.AddCert(appleRoot)
-
 	intermediatePool := x509.NewCertPool()
 	for _, cert := range certs[1:] {
 		intermediatePool.AddCert(cert)

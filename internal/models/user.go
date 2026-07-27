@@ -12,7 +12,11 @@ type User struct {
 	Phone       string     `json:"phone"`
 	Zip         string     `json:"zip"`                             // Clinic code
 	GroupID     int        `gorm:"column:group_id" json:"group_id"` // 1=owner, 2=vet, 4=admin
-	Password    []byte     `gorm:"type:bytea" json:"-"`             // AES encrypted, never exposed in JSON
+	Password    []byte     `gorm:"type:bytea" json:"-"`             // AES encrypted (legacy); kept populated during migration window
+	// PasswordHash is bcrypt; preferred. Empty = legacy AES-only user
+	// who hasn't logged in since the migration shipped — those get
+	// backfilled on next successful Login.
+	PasswordHash string `gorm:"column:password_hash" json:"-"`
 	CompanyName string     `gorm:"column:company_name" json:"company_name"`
 	Address     string     `json:"address"`
 	City        string     `json:"city"`

@@ -427,11 +427,30 @@ func (h *PetHandler) Certificate(w http.ResponseWriter, r *http.Request) {
 
 	petIDStr := strconv.Itoa(int(pet.ID))
 
+	// One round-trip instead of four — DISTINCT ON returns the most
+	// recent record per tp in the (1, 101, 3, 4) set. Postgres-only,
+	// matches the rest of the codebase.
+	var rows []models.Procedure
+	h.db.Raw(`
+		SELECT DISTINCT ON (tp) *
+		FROM vaccination
+		WHERE uuid = ? AND tp IN (1, 101, 3, 4)
+		ORDER BY tp, date DESC
+	`, petIDStr).Scan(&rows)
+
 	var lastVax, lastRabies, lastDehel, lastEcto models.Procedure
-	h.db.Where("uuid = ? AND tp = 1", petIDStr).Order("date DESC").First(&lastVax)
-	h.db.Where("uuid = ? AND tp = 101", petIDStr).Order("date DESC").First(&lastRabies)
-	h.db.Where("uuid = ? AND tp = 3", petIDStr).Order("date DESC").First(&lastDehel)
-	h.db.Where("uuid = ? AND tp = 4", petIDStr).Order("date DESC").First(&lastEcto)
+	for _, r := range rows {
+		switch r.TP {
+		case 1:
+			lastVax = r
+		case 101:
+			lastRabies = r
+		case 3:
+			lastDehel = r
+		case 4:
+			lastEcto = r
+		}
+	}
 
 	writeJSON(w, http.StatusOK, CertificateResponse{
 		Pet:             petToListItem(pet),
