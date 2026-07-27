@@ -2,10 +2,24 @@
 //
 // Modes:
 //   go run ./cmd/sync                     # incremental — inserts only missing-by-id rows
+//   go run ./cmd/sync --update            # ALSO refresh rows edited upstream (upsert)
 //   go run ./cmd/sync --full              # TRUNCATE + full re-copy (interactive confirm)
 //   go run ./cmd/sync --full --yes        # full re-copy, skip confirmation prompt
 //   go run ./cmd/sync --dry-run           # print row-count diff, no writes
 //   go run ./cmd/sync --full --dry-run    # plan a full re-copy without doing it
+//
+// Which mode do I want?
+//
+// The PHP app is still live, so MySQL rows are not just APPENDED —
+// they are EDITED. Plain incremental mode compares ids only, so an
+// edit to an already-synced row is invisible to it: measured on
+// 2026-07-27, 592 of 31,958 pets (1.9%) had drifted, including 388
+// microchip numbers that exist in MySQL but are blank in Postgres
+// because the chip was registered after the pet first synced.
+//
+// Use --update for the routine sync while the old app is still in
+// production. Plain incremental is only appropriate for append-only
+// tables, and cheaper mainly because it moves less data.
 //
 // MySQL is the source of truth. Supabase becomes an exact copy. For
 // memberlogin_members, passwords are re-encrypted (MySQL salt → PG salt).
@@ -48,14 +62,27 @@ const (
 // turns the tool into a row-count diff report.
 var dryRun bool
 
+// updateExisting turns inserts into upserts so rows EDITED in the live
+// MySQL app are refreshed in Postgres, not just newly-created ones.
+// See conflictClause for why this matters.
+var updateExisting bool
+
 func main() {
 	var (
-		fullSync = flag.Bool("full", false, "TRUNCATE Supabase + full re-copy from MySQL (default: incremental)")
-		dr       = flag.Bool("dry-run", false, "Read-only mode — report per-table counts, do not write")
+		fullSync  = flag.Bool("full", false, "TRUNCATE Supabase + full re-copy from MySQL (default: incremental)")
+		dr        = flag.Bool("dry-run", false, "Read-only mode — report per-table counts, do not write")
 		assumeYes = flag.Bool("yes", false, "Skip the interactive confirmation prompt for --full")
+		update    = flag.Bool("update", false, "Also refresh rows that already exist in Supabase but were EDITED in MySQL (upsert). Without this, only brand-new ids are copied and upstream edits are silently lost.")
 	)
 	flag.Parse()
 	dryRun = *dr
+	updateExisting = *update
+	// A full re-copy always rewrites every row, so upsert semantics are
+	// implied — and needed, because TRUNCATE may be skipped for tables
+	// with dependent rows.
+	if *fullSync {
+		updateExisting = true
+	}
 
 	switch {
 	case *fullSync && dryRun:
@@ -421,8 +448,24 @@ func syncTable(my, pg *sql.DB, table string, fullSync bool) {
 			return
 		}
 		query = fmt.Sprintf("SELECT %s FROM `%s`", mysqlQuoteCols(cols), table)
+	} else if updateExisting {
+		// Refresh mode: re-copy EVERY upstream row and let the upsert
+		// settle which are new and which changed. Comparing row
+		// contents client-side would mean pulling both tables in full
+		// anyway, so we let Postgres do the work.
+		my.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM `%s`", table)).Scan(&totalRows)
+		log.Printf("--- %s --- %d rows (refresh: insert new + update changed)", table, totalRows)
+		if totalRows == 0 {
+			log.Printf("  empty, skipping")
+			return
+		}
+		query = fmt.Sprintf("SELECT %s FROM `%s`", mysqlQuoteCols(cols), table)
 	} else {
-		// Incremental: find missing IDs
+		// Incremental: find missing IDs.
+		//
+		// NOTE: this mode copies only ids ABSENT from Postgres, so a row
+		// edited upstream after it was first synced is never refreshed.
+		// Use --update to repair that drift.
 		missing := findMissingIDs(my, pg, table)
 		totalRows = len(missing)
 		log.Printf("--- %s --- %d missing rows", table, totalRows)
@@ -455,7 +498,7 @@ func syncTable(my, pg *sql.DB, table string, fullSync bool) {
 			errors++
 			continue
 		}
-		batch = append(batch, extractValues(dest))
+		batch = append(batch, extractValuesFor(table, cols, dest))
 
 		if len(batch) >= batchSize {
 			n, e := insertBatch(pg, table, cols, batch)
@@ -505,23 +548,33 @@ func insertBatch(pg *sql.DB, table string, cols []string, batch [][]interface{})
 		allVals = append(allVals, row...)
 	}
 
+	suffix := conflictClause(pg, table, cols)
+
 	query := fmt.Sprintf(
-		"INSERT INTO \"%s\" (%s) VALUES %s",
-		table, pgQuoteCols(cols), strings.Join(valueClauses, ", "),
+		"INSERT INTO \"%s\" (%s) VALUES %s%s",
+		table, pgQuoteCols(cols), strings.Join(valueClauses, ", "), suffix,
 	)
 
 	_, err := pg.Exec(query, allVals...)
 	if err != nil {
-		// If batch fails, fall back to row-by-row to skip bad rows
+		// If batch fails, fall back to row-by-row so one bad row can't
+		// discard the whole batch. Errors are reported per row.
 		ok := 0
 		bad := 0
 		single := fmt.Sprintf(
-			"INSERT INTO \"%s\" (%s) VALUES (%s)",
-			table, pgQuoteCols(cols), pgPlaceholders(nCols),
+			"INSERT INTO \"%s\" (%s) VALUES (%s)%s",
+			table, pgQuoteCols(cols), pgPlaceholders(nCols), suffix,
 		)
 		for _, row := range batch {
 			if _, err := pg.Exec(single, row...); err != nil {
 				bad++
+				// Log the first few so failures aren't silent. The old
+				// behaviour incremented a counter and swallowed the
+				// reason, which hid a real bug for weeks (see the
+				// memberlogin_users timestamp failure).
+				if bad <= 3 {
+					log.Printf("  row error (%s id=%v): %v", table, firstVal(row), err)
+				}
 			} else {
 				ok++
 			}
@@ -529,6 +582,108 @@ func insertBatch(pg *sql.DB, table string, cols []string, batch [][]interface{})
 		return ok, bad
 	}
 	return len(batch), 0
+}
+
+// conflictClause returns the ON CONFLICT suffix for an upsert.
+//
+// Why this exists: MySQL is the source of truth and stays live while
+// the PHP app is still in production, so a row can be EDITED upstream
+// after it was first copied. Incremental sync only looks for ids
+// missing from Postgres, so those edits were invisible — a measured
+// 592 of 31,958 pets (1.9%) had drifted, including 388 microchip
+// numbers present in MySQL but blank in Postgres because the chip was
+// registered after the pet first synced. Chips are a pet's legal
+// identifier; silently losing them is not acceptable at cutover.
+//
+// With updateExisting the insert becomes an upsert, so re-running the
+// sync repairs drift instead of skipping it.
+//
+// The conflict target is the table's ACTUAL primary key, read from
+// Postgres — not an assumed `id`. Several legacy tables use something
+// else: memberlogin_options is keyed on (foreign_id, key), and
+// assuming `id` there produced 83 duplicate-key failures per run.
+// Tables with no primary key get a plain INSERT, since there is
+// nothing to conflict on.
+func conflictClause(pg *sql.DB, table string, cols []string) string {
+	if !updateExisting {
+		return ""
+	}
+	pk := primaryKeyCols(pg, table)
+	if len(pk) == 0 {
+		return ""
+	}
+
+	inPK := make(map[string]bool, len(pk))
+	for _, c := range pk {
+		inPK[strings.ToLower(c)] = true
+	}
+
+	sets := make([]string, 0, len(cols))
+	for _, c := range cols {
+		if inPK[strings.ToLower(c)] {
+			continue // never rewrite the key we matched on
+		}
+		sets = append(sets, fmt.Sprintf("%q = EXCLUDED.%q", c, c))
+	}
+
+	target := make([]string, len(pk))
+	for i, c := range pk {
+		target[i] = fmt.Sprintf("%q", c)
+	}
+	conflict := " ON CONFLICT (" + strings.Join(target, ", ") + ")"
+
+	if len(sets) == 0 {
+		// Key-only table: nothing to update, but still don't error.
+		return conflict + " DO NOTHING"
+	}
+	return conflict + " DO UPDATE SET " + strings.Join(sets, ", ")
+}
+
+// pkCache memoises primary-key lookups so we don't re-query the
+// catalog for every batch.
+var pkCache = map[string][]string{}
+
+// primaryKeyCols returns a table's primary-key columns in index order.
+func primaryKeyCols(pg *sql.DB, table string) []string {
+	if cached, ok := pkCache[table]; ok {
+		return cached
+	}
+	rows, err := pg.Query(`
+		SELECT a.attname
+		FROM pg_index i
+		JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+		WHERE i.indrelid = $1::regclass AND i.indisprimary
+		ORDER BY array_position(i.indkey, a.attnum)`, table)
+	if err != nil {
+		log.Printf("  WARN %s: could not read primary key (%v) — falling back to plain INSERT", table, err)
+		pkCache[table] = nil
+		return nil
+	}
+	defer rows.Close()
+
+	var cols []string
+	for rows.Next() {
+		var c string
+		if rows.Scan(&c) == nil {
+			cols = append(cols, c)
+		}
+	}
+	pkCache[table] = cols
+	return cols
+}
+
+// firstVal renders a row's first column (the id, in practice) for
+// error messages.
+func firstVal(row []interface{}) string {
+	if len(row) == 0 {
+		return "?"
+	}
+	switch v := row[0].(type) {
+	case []byte:
+		return string(v)
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 // syncMembers handles memberlogin_members with password re-encryption.
@@ -541,6 +696,16 @@ func syncMembers(my, pg *sql.DB, fullSync bool) {
 	if fullSync {
 		my.QueryRow("SELECT COUNT(*) FROM `memberlogin_members`").Scan(&totalRows)
 		log.Printf("--- memberlogin_members --- %d rows (with password re-encryption)", totalRows)
+		if totalRows == 0 {
+			return
+		}
+		query = fmt.Sprintf("SELECT %s FROM `memberlogin_members`", mysqlQuoteCols(cols))
+	} else if updateExisting {
+		// Refresh: re-copy every member so upstream edits (email, phone,
+		// name changes made in the PHP app) reach Postgres. Passwords are
+		// re-encrypted below exactly as in a full sync.
+		my.QueryRow("SELECT COUNT(*) FROM `memberlogin_members`").Scan(&totalRows)
+		log.Printf("--- memberlogin_members --- %d rows (refresh, with password re-encryption)", totalRows)
 		if totalRows == 0 {
 			return
 		}
@@ -741,20 +906,59 @@ func pgPlaceholders(n int) string {
 func makeScanDest(n int) []interface{} {
 	d := make([]interface{}, n)
 	for i := range d {
-		d[i] = new(sql.NullString)
+		// Scan into RawBytes-backed byte slices rather than strings:
+		// some legacy columns hold binary (AES ciphertext), and forcing
+		// those through a Go string produces invalid UTF-8 that
+		// Postgres rejects with SQLSTATE 22021. extractValues decides
+		// per column whether the bytes are text or binary.
+		d[i] = new(sql.RawBytes)
 	}
 	return d
+}
+
+// binaryCols lists table.column pairs whose contents are binary, not
+// text. They must be passed to Postgres as []byte so the driver sends
+// them to a bytea column instead of trying to encode them as UTF-8.
+//
+// memberlogin_users.password is AES ciphertext; a byte like 0xa5 is
+// not valid UTF-8 and made the admin row fail to sync on every run.
+var binaryCols = map[string]bool{
+	"memberlogin_users.password":   true,
+	"memberlogin_members.password": true,
+}
+
+func extractValuesFor(table string, cols []string, dest []interface{}) []interface{} {
+	v := make([]interface{}, len(dest))
+	for i, d := range dest {
+		raw := *(d.(*sql.RawBytes))
+		if raw == nil {
+			v[i] = nil
+			continue
+		}
+		// Copy: RawBytes is only valid until the next rows.Next().
+		b := make([]byte, len(raw))
+		copy(b, raw)
+
+		if i < len(cols) && binaryCols[table+"."+strings.ToLower(cols[i])] {
+			v[i] = b
+		} else {
+			v[i] = string(b)
+		}
+	}
+	return v
 }
 
 func extractValues(dest []interface{}) []interface{} {
 	v := make([]interface{}, len(dest))
 	for i, d := range dest {
-		ns := d.(*sql.NullString)
-		if ns.Valid {
-			v[i] = ns.String
-		} else {
+		raw := *(d.(*sql.RawBytes))
+		if raw == nil {
 			v[i] = nil
+			continue
 		}
+		b := make([]byte, len(raw))
+		copy(b, raw)
+		v[i] = string(b)
 	}
 	return v
 }
