@@ -408,13 +408,20 @@ func (h *SubscriptionHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up the package once so we know how far to extend the pet's
-	// expiry. Failure here means the package was renamed or deleted —
-	// we still record the payment success but skip pet activation, and
-	// the user should contact support.
+	// Look up the package so we know how far to extend the pet's expiry.
+	//
+	// Resolved by PRICE, not by name: payments_ipay has no `package`
+	// column (see models.Subscription), so sub.Package is empty on any
+	// row read back from the database and a name lookup would always
+	// miss — leaving pkg.Duration at 0 and silently activating nothing.
+	// Price is stored, and package prices are distinct.
+	//
+	// Failure here means the package was re-priced or deleted since
+	// checkout; we still record the payment as successful but skip
+	// activation rather than granting an arbitrary duration.
 	var pkg models.Package
-	if err := h.db.Where("name = ?", sub.Package).First(&pkg).Error; err != nil {
-		log.Warn("ipay_callback_package_not_found", "package", sub.Package, "order_id", orderID)
+	if err := h.db.Where("price = ?", sub.Amount).First(&pkg).Error; err != nil {
+		log.Warn("callback_package_not_found", "price", sub.Amount, "order_id", orderID, "error", err)
 	}
 
 	expiry := time.Now().AddDate(0, 0, pkg.Duration).Format("2006-01-02")
