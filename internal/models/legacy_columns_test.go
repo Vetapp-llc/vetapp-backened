@@ -117,3 +117,37 @@ func TestNormalizePayMethod(t *testing.T) {
 		}
 	}
 }
+
+// TestAppointmentColumns pins operationdate. The table is
+// (id, uuid, date, date2, date3, operation, sk, pname, owner, ownern,
+// coment, tp, price, sax, pet, vetname, time) — no phone, tpname,
+// koment or status column, and getting this wrong meant clinics could
+// not book an appointment at all.
+func TestAppointmentColumns(t *testing.T) {
+	assertColumns(t, &Appointment{}, map[string]string{
+		"ID":      "id",
+		"UUID":    "uuid",
+		"Date":    "date",
+		"Time":    "time",
+		"SK":      "sk",
+		"VetName": "vetname",
+		"PName":   "pname",
+		"Owner":   "owner",
+		"OwnerN":  "ownern",
+		"TPName":  "operation",
+		"Koment":  "coment",
+	})
+}
+
+// Status and Phone must never reach the database.
+func TestAppointmentIgnoresAbsentColumns(t *testing.T) {
+	s, err := schema.Parse(&Appointment{}, &sync.Map{}, schema.NamingStrategy{})
+	if err != nil {
+		t.Fatalf("schema.Parse: %v", err)
+	}
+	for _, name := range s.DBNames {
+		if name == "status" || name == "phone" || name == "tpname" || name == "koment" {
+			t.Errorf("column %q is persisted but does not exist on operationdate", name)
+		}
+	}
+}

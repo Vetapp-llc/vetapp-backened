@@ -159,11 +159,73 @@ type OwnerVisit struct {
 	Date      string `json:"date" validate:"required"`
 	Time      string `json:"time" validate:"required"`
 	Operation string `json:"operation" validate:"required"`
-	VetName   string `json:"vetName" validate:"required"`
-	Status    string `json:"status" validate:"required"`
+	// VetName is the raw `vetname` value (a member ID). Kept for
+	// backwards compatibility; clients should display VetFullName.
+	VetName string `json:"vetName" validate:"required"`
+	// VetFullName is the resolved human name, empty when the
+	// appointment has no vet assigned yet.
+	VetFullName string `json:"vetFullName"`
+	// PetID / PetName identify which animal the visit is for — an owner
+	// with several pets cannot otherwise tell them apart.
+	PetID   string `json:"petId"`
+	PetName string `json:"petName"`
+	Status  string `json:"status" validate:"required"`
+	// Upcoming is true when the visit is today or later, so the client
+	// doesn't have to re-implement date comparison against the server's
+	// notion of "today".
+	Upcoming bool `json:"upcoming"`
 }
 
 // --- Helpers ---
+
+// resolveVetNames maps raw `vetname` values (member IDs stored as TEXT)
+// to display names in one query, instead of one query per record.
+//
+// Schema notes:
+//   - `vetname` is TEXT and legacy rows frequently carry trailing
+//     whitespace (e.g. "149  ") from the MySQL import, so keys are
+//     trimmed before lookup.
+//   - "" and "0" both mean "no vet" — those records were self-reported
+//     by the owner.
+//   - In `memberlogin_members`, `first_name` holds the full
+//     human-readable name while `last_name` is actually the Georgian
+//     personal ID (see models/user.go), so display from `first_name`.
+//
+// Shared by the procedures and visits endpoints; keep it that way so
+// the two can't disagree about how a vet is named.
+func (h *OwnerPortalHandler) resolveVetNames(rawIDs []string) map[string]string {
+	idSet := make(map[string]struct{}, len(rawIDs))
+	for _, raw := range rawIDs {
+		key := strings.TrimSpace(raw)
+		if key != "" && key != "0" {
+			idSet[key] = struct{}{}
+		}
+	}
+	names := make(map[string]string, len(idSet))
+	if len(idSet) == 0 {
+		return names
+	}
+
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	type vetRow struct {
+		ID        string
+		FirstName string
+	}
+	var vets []vetRow
+	h.db.Table("memberlogin_members").
+		Select("id::text AS id, first_name").
+		Where("id::text IN ?", ids).
+		Scan(&vets)
+	for _, v := range vets {
+		if full := strings.TrimSpace(v.FirstName); full != "" {
+			names[v.ID] = full
+		}
+	}
+	return names
+}
 
 func subscriptionStatus(pet models.Pet) string {
 	if pet.Status >= 2 {
@@ -467,35 +529,11 @@ func (h *OwnerPortalHandler) Procedures(w http.ResponseWriter, r *http.Request) 
 	//     full human-readable name (often "First Last" already), while
 	//     `last_name` is actually the Georgian personal ID — see
 	//     models/user.go. So display from `first_name` only.
-	vetIDSet := make(map[string]struct{})
+	rawVetIDs := make([]string, 0, len(procs))
 	for _, p := range procs {
-		key := strings.TrimSpace(p.VetName)
-		if key != "" && key != "0" {
-			vetIDSet[key] = struct{}{}
-		}
+		rawVetIDs = append(rawVetIDs, p.VetName)
 	}
-	vetNames := make(map[string]string, len(vetIDSet))
-	if len(vetIDSet) > 0 {
-		ids := make([]string, 0, len(vetIDSet))
-		for id := range vetIDSet {
-			ids = append(ids, id)
-		}
-		type vetRow struct {
-			ID        string
-			FirstName string
-		}
-		var vets []vetRow
-		h.db.Table("memberlogin_members").
-			Select("id::text AS id, first_name").
-			Where("id::text IN ?", ids).
-			Scan(&vets)
-		for _, v := range vets {
-			full := strings.TrimSpace(v.FirstName)
-			if full != "" {
-				vetNames[v.ID] = full
-			}
-		}
-	}
+	vetNames := h.resolveVetNames(rawVetIDs)
 
 	items := make([]OwnerProcedureItem, len(procs))
 	for i, p := range procs {
@@ -1212,15 +1250,68 @@ func (h *OwnerPortalHandler) Visits(w http.ResponseWriter, r *http.Request) {
 	var appointments []models.Appointment
 	h.db.Where("owner = ?", personalID).Order("date DESC, time ASC").Find(&appointments)
 
+	// Resolve vet member IDs to display names in one query, the same way
+	// the procedures endpoint does.
+	rawVetIDs := make([]string, 0, len(appointments))
+	for _, a := range appointments {
+		rawVetIDs = append(rawVetIDs, a.VetName)
+	}
+	vetNames := h.resolveVetNames(rawVetIDs)
+
+	// Resolve pet names for the appointments that reference a pet id.
+	// `pname` on the appointment is free text the clinic typed and is
+	// often a description rather than a name ("ძაღლი ჩარლი მენჯოს..."),
+	// so prefer the actual pet record and fall back to pname.
+	petIDSet := make(map[string]struct{}, len(appointments))
+	for _, a := range appointments {
+		if id := strings.TrimSpace(a.UUID); id != "" {
+			petIDSet[id] = struct{}{}
+		}
+	}
+	petNames := make(map[string]string, len(petIDSet))
+	if len(petIDSet) > 0 {
+		ids := make([]string, 0, len(petIDSet))
+		for id := range petIDSet {
+			ids = append(ids, id)
+		}
+		type petRow struct {
+			ID   string
+			Name string
+		}
+		var rows []petRow
+		h.db.Table("pets").
+			Select("id::text AS id, name").
+			Where("id::text IN ?", ids).
+			Scan(&rows)
+		for _, p := range rows {
+			if n := strings.TrimSpace(p.Name); n != "" {
+				petNames[p.ID] = n
+			}
+		}
+	}
+
+	today := time.Now().Format("2006-01-02")
+
 	items := make([]OwnerVisit, len(appointments))
 	for i, a := range appointments {
+		petID := strings.TrimSpace(a.UUID)
+		petName := petNames[petID]
+		if petName == "" {
+			petName = strings.TrimSpace(a.PName)
+		}
+
 		items[i] = OwnerVisit{
-			ID:        a.ID,
-			Date:      a.Date,
-			Time:      a.Time,
-			Operation: a.TPName,
-			VetName:   a.VetName,
-			Status:    a.Status,
+			ID:          a.ID,
+			Date:        a.Date,
+			Time:        a.Time,
+			Operation:   a.TPName,
+			VetName:     a.VetName,
+			VetFullName: vetNames[strings.TrimSpace(a.VetName)],
+			PetID:       petID,
+			PetName:     petName,
+			Status:      a.Status,
+			// TEXT ISO dates compare correctly lexicographically.
+			Upcoming: a.Date >= today,
 		}
 	}
 
