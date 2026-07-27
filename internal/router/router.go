@@ -28,7 +28,13 @@ func allowedOrigins() []string {
 	raw := strings.TrimSpace(os.Getenv("CORS_ORIGINS"))
 	if raw == "" {
 		return []string{
+			// 3002 is where vetapp-web's dev script binds; 3000/3001 are
+			// kept because Next.js falls back to them and other projects
+			// commonly occupy 3000 on the same machine.
+			"http://localhost:3002",
 			"http://localhost:3000",
+			"http://localhost:3001",
+			// Expo dev server / web preview.
 			"http://localhost:8081",
 			"http://localhost:19006",
 		}

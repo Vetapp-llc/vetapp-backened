@@ -45,8 +45,10 @@ npm install        # first time only
 npm run dev
 ```
 
-Opens on **http://localhost:3000** — or 3001/3002 if that port is
-taken; the actual URL is printed in the terminal.
+Opens on **http://localhost:3002**. The port is pinned in
+`package.json` rather than left to Next.js' auto-increment, because port
+3000 belongs to another project on this machine and a moving URL also
+means CORS breaks intermittently.
 
 Which backend it talks to is set in `.env.local`:
 
@@ -148,8 +150,15 @@ created directly in Supabase).
 **Backend won't start, database error** — Supabase has auto-paused;
 resume it from the dashboard.
 
-**Website port already in use** — Next.js picks the next free port and
-prints it. Nothing to fix.
+**Website CORS errors in the browser console** — the backend only
+allows a fixed list of origins (3000/3001/3002 by default, see
+`allowedOrigins` in internal/router/router.go). If you run the site on
+another port, add it to `CORS_ORIGINS` or the browser will block every
+API call.
+
+**Don't `pkill -f "next dev"`** — it matches every Next.js dev server on
+the machine, including unrelated projects. Kill by port instead:
+`lsof -ti:3002 | xargs kill`.
 
 **Card payment fails** — expected. iPay is Bank of Georgia's deprecated
 gateway and returns HTML instead of JSON. The replacement (BOG Payments
