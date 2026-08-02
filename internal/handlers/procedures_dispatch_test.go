@@ -242,7 +242,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 			Ser:    "ABC123",
 			Coment: "comment text",
 		}
-		got := buildOwnerProcedureItem(&p, nil)
+		got := buildOwnerProcedureItem(&p, nil, nil)
 		if got.VaccineType != "კომპლექსური ვაქცინა" {
 			t.Errorf("VaccineType = %q", got.VaccineType)
 		}
@@ -271,7 +271,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 			TP:   11,
 			Vac1: "Frontline",
 		}
-		got := buildOwnerProcedureItem(&p, nil)
+		got := buildOwnerProcedureItem(&p, nil, nil)
 		if len(got.EctoItems) != 1 || got.EctoItems[0].Type != "drops" {
 			t.Errorf("EctoItems = %+v, want one drops entry", got.EctoItems)
 		}
@@ -279,7 +279,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 
 	t.Run("dehelminization tp=12 prefers Deh over Vac", func(t *testing.T) {
 		p := models.Procedure{TP: 12, Deh: "Drontal", Vac: "ignored"}
-		got := buildOwnerProcedureItem(&p, nil)
+		got := buildOwnerProcedureItem(&p, nil, nil)
 		if got.Preparat != "Drontal" {
 			t.Errorf("Preparat = %q, want Drontal", got.Preparat)
 		}
@@ -287,7 +287,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 
 	t.Run("dehelminization tp=12 falls back to Vac when Deh empty", func(t *testing.T) {
 		p := models.Procedure{TP: 12, Vac: "Custom dewormer"}
-		got := buildOwnerProcedureItem(&p, nil)
+		got := buildOwnerProcedureItem(&p, nil, nil)
 		if got.Preparat != "Custom dewormer" {
 			t.Errorf("Preparat = %q, want Custom dewormer", got.Preparat)
 		}
@@ -301,7 +301,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 			Vac2: "ovarian cyst",
 			Vac3: "surgical removal",
 		}
-		got := buildOwnerProcedureItem(&p, nil)
+		got := buildOwnerProcedureItem(&p, nil, nil)
 		if got.Anamnesis != "history of mild allergy" {
 			t.Errorf("Anamnesis = %q", got.Anamnesis)
 		}
@@ -322,7 +322,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 
 	t.Run("generic procedure name falls back to canonical label when Vac empty", func(t *testing.T) {
 		p := models.Procedure{TP: 106}
-		got := buildOwnerProcedureItem(&p, nil)
+		got := buildOwnerProcedureItem(&p, nil, nil)
 		// No per-record name set → use the localized category label
 		// from procedureTypeNames[106] = "ქირურგია".
 		if got.ProcedureName != "ქირურგია" {
@@ -337,7 +337,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 			Diagn: "fallback diagn",
 			Nout:  "fallback nout",
 		}
-		got := buildOwnerProcedureItem(&p, nil)
+		got := buildOwnerProcedureItem(&p, nil, nil)
 		if got.Anamnesis != "fallback anam" {
 			t.Errorf("Anamnesis = %q", got.Anamnesis)
 		}
@@ -351,7 +351,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 
 	t.Run("test tp=2 populates TestResults", func(t *testing.T) {
 		p := models.Procedure{TP: 2, VacN: "უარყოფითი"}
-		got := buildOwnerProcedureItem(&p, nil)
+		got := buildOwnerProcedureItem(&p, nil, nil)
 		if len(got.TestResults) != 1 || got.TestResults[0].Label != "Leishmania" {
 			t.Errorf("TestResults = %+v", got.TestResults)
 		}
@@ -359,7 +359,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 
 	t.Run("vetname numeric resolved via JOIN map", func(t *testing.T) {
 		p := models.Procedure{TP: 1, VetName: "47"}
-		got := buildOwnerProcedureItem(&p, map[string]string{"47": "Dr. Maia"})
+		got := buildOwnerProcedureItem(&p, map[string]string{"47": "Dr. Maia"}, nil)
 		if got.VetFullName != "Dr. Maia" {
 			t.Errorf("VetFullName = %q, want Dr. Maia", got.VetFullName)
 		}
@@ -370,7 +370,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 
 	t.Run("vetname with trailing whitespace trimmed before lookup", func(t *testing.T) {
 		p := models.Procedure{TP: 1, VetName: "47  "}
-		got := buildOwnerProcedureItem(&p, map[string]string{"47": "Dr. Maia"})
+		got := buildOwnerProcedureItem(&p, map[string]string{"47": "Dr. Maia"}, nil)
 		if got.VetFullName != "Dr. Maia" {
 			t.Errorf("VetFullName = %q (trim broken?)", got.VetFullName)
 		}
@@ -381,7 +381,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 
 	t.Run("vetname '0' counts as owner-added", func(t *testing.T) {
 		p := models.Procedure{TP: 1, VetName: "0"}
-		got := buildOwnerProcedureItem(&p, nil)
+		got := buildOwnerProcedureItem(&p, nil, nil)
 		if !got.AddedByOwner {
 			t.Errorf("expected AddedByOwner=true for vetname='0'")
 		}
@@ -391,7 +391,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 		// dani is the legacy prescription column. Per partner spec it
 		// should appear on the owner accordion regardless of category.
 		p := models.Procedure{TP: 106, Dani: "Take 1 tablet/day for 7 days"}
-		got := buildOwnerProcedureItem(&p, nil)
+		got := buildOwnerProcedureItem(&p, nil, nil)
 		if got.Prescription != "Take 1 tablet/day for 7 days" {
 			t.Errorf("Prescription = %q", got.Prescription)
 		}
@@ -402,7 +402,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 			TP:     1,
 			Coment: "line one<br />line two<br/>line three",
 		}
-		got := buildOwnerProcedureItem(&p, nil)
+		got := buildOwnerProcedureItem(&p, nil, nil)
 		if got.Comment != "line one\nline two\nline three" {
 			t.Errorf("Comment = %q (cleanText not applied?)", got.Comment)
 		}
@@ -410,7 +410,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 
 	t.Run("legacy tpname='1' replaced with canonical label", func(t *testing.T) {
 		p := models.Procedure{TP: 1, TPName: "1"}
-		got := buildOwnerProcedureItem(&p, nil)
+		got := buildOwnerProcedureItem(&p, nil, nil)
 		if got.ProcedureName != "ვაქცინაცია" {
 			t.Errorf("ProcedureName = %q, want ვაქცინაცია (numeric tpname not normalized)", got.ProcedureName)
 		}
@@ -418,7 +418,7 @@ func TestBuildOwnerProcedureItem(t *testing.T) {
 
 	t.Run("vaccinations array always non-nil JSON-friendly", func(t *testing.T) {
 		p := models.Procedure{TP: 1}
-		got := buildOwnerProcedureItem(&p, nil)
+		got := buildOwnerProcedureItem(&p, nil, nil)
 		if got.Vaccinations == nil {
 			t.Errorf("Vaccinations = nil, expected empty []string{} for JSON marshalling")
 		}
@@ -475,4 +475,45 @@ func TestCommaDate(t *testing.T) {
 			t.Errorf("commaDate(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
+}
+
+// Clinic name resolution feeds the "clinic and vet" rows the mobile app
+// shows on every procedure. The map is keyed by the trimmed `sk` code
+// because legacy rows carry trailing whitespace, and owner-added
+// records have an empty `sk` — those must resolve to "" so the client
+// can suppress the row rather than render a blank label.
+func TestBuildOwnerProcedureItemClinicName(t *testing.T) {
+	clinics := map[string]string{"405284393": "შპს ვეტექსი"}
+
+	t.Run("clinic resolved from sk", func(t *testing.T) {
+		p := models.Procedure{TP: 1, SK: "405284393"}
+		got := buildOwnerProcedureItem(&p, nil, clinics)
+		if got.ClinicName != "შპს ვეტექსი" {
+			t.Errorf("ClinicName = %q, want %q", got.ClinicName, "შპს ვეტექსი")
+		}
+	})
+
+	t.Run("sk with trailing whitespace still resolves", func(t *testing.T) {
+		p := models.Procedure{TP: 1, SK: "405284393  "}
+		got := buildOwnerProcedureItem(&p, nil, clinics)
+		if got.ClinicName != "შპს ვეტექსი" {
+			t.Errorf("ClinicName = %q, want it trimmed and resolved", got.ClinicName)
+		}
+	})
+
+	t.Run("owner-added record has no clinic", func(t *testing.T) {
+		p := models.Procedure{TP: 1, SK: ""}
+		got := buildOwnerProcedureItem(&p, nil, clinics)
+		if got.ClinicName != "" {
+			t.Errorf("ClinicName = %q, want empty for an owner-added record", got.ClinicName)
+		}
+	})
+
+	t.Run("unknown clinic code yields empty, not a placeholder", func(t *testing.T) {
+		p := models.Procedure{TP: 1, SK: "999999999"}
+		got := buildOwnerProcedureItem(&p, nil, clinics)
+		if got.ClinicName != "" {
+			t.Errorf("ClinicName = %q, want empty", got.ClinicName)
+		}
+	})
 }
