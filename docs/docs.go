@@ -1893,16 +1893,25 @@ const docTemplate = `{
                         "description": "End date (YYYY-MM-DD)",
                         "name": "date_to",
                         "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Rows per page (default 50, max 200)",
+                        "name": "pageSize",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/internal_handlers.PaymentResponse"
-                            }
+                            "$ref": "#/definitions/internal_handlers.PaginatedResponse"
                         }
                     },
                     "500": {
@@ -2545,16 +2554,25 @@ const docTemplate = `{
                         "description": "Procedure type code",
                         "name": "tp",
                         "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Rows per page (default 50, max 200)",
+                        "name": "pageSize",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/vetapp-backend_internal_models.Procedure"
-                            }
+                            "$ref": "#/definitions/internal_handlers.PaginatedResponse"
                         }
                     },
                     "500": {
@@ -3029,16 +3047,25 @@ const docTemplate = `{
                         "description": "End date (YYYY-MM-DD)",
                         "name": "date_to",
                         "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Rows per page (default 50, max 200)",
+                        "name": "pageSize",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/internal_handlers.ShopResponse"
-                            }
+                            "$ref": "#/definitions/internal_handlers.PaginatedResponse"
                         }
                     },
                     "500": {

@@ -95,7 +95,9 @@ type EctoOptionsResponse struct {
 // @Param vet_id query string false "Vet member ID"
 // @Param pet_id query string false "Pet ID"
 // @Param tp query int false "Procedure type code"
-// @Success 200 {array} models.Procedure
+// @Param page query int false "Page number (default 1)"
+// @Param pageSize query int false "Rows per page (default 50, max 200)"
+// @Success 200 {object} PaginatedResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /procedures [get]
 func (h *ProcedureHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -132,13 +134,21 @@ func (h *ProcedureHandler) List(w http.ResponseWriter, r *http.Request) {
 		query = query.Where("tp = ?", tp)
 	}
 
+	// Paginated: unbounded, this returned every procedure the clinic
+	// had ever recorded — 84,847 rows (~24.5 MB) for the busiest clinic
+	// in production, held open on one connection for the duration.
+	page := ParsePageParams(r)
+
+	var total int64
+	query.Count(&total)
+
 	var procedures []models.Procedure
-	if err := query.Order("date DESC, id DESC").Find(&procedures).Error; err != nil {
+	if err := page.Paginate(query).Order("date DESC, id DESC").Find(&procedures).Error; err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to fetch procedures"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, procedures)
+	writeJSON(w, http.StatusOK, NewPaginatedResponse(procedures, total, page))
 }
 
 // Get returns a single procedure by ID.

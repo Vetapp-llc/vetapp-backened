@@ -172,7 +172,9 @@ func (h *PaymentHandler) Daily(w http.ResponseWriter, r *http.Request) {
 // @Param clinic query string false "Clinic code"
 // @Param date_from query string false "Start date (YYYY-MM-DD)"
 // @Param date_to query string false "End date (YYYY-MM-DD)"
-// @Success 200 {array} PaymentResponse
+// @Param page query int false "Page number (default 1)"
+// @Param pageSize query int false "Rows per page (default 50, max 200)"
+// @Success 200 {object} PaginatedResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /payments/history [get]
 func (h *PaymentHandler) History(w http.ResponseWriter, r *http.Request) {
@@ -198,8 +200,14 @@ func (h *PaymentHandler) History(w http.ResponseWriter, r *http.Request) {
 		query = query.Where("date <= ?", dateTo)
 	}
 
+	// Paginated: 52,225 rows for the busiest clinic without a bound.
+	page := ParsePageParams(r)
+
+	var total int64
+	query.Count(&total)
+
 	var payments []models.Payment
-	if err := query.Order("date DESC, id DESC").Find(&payments).Error; err != nil {
+	if err := page.Paginate(query).Order("date DESC, id DESC").Find(&payments).Error; err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to fetch payment history"})
 		return
 	}
@@ -209,5 +217,5 @@ func (h *PaymentHandler) History(w http.ResponseWriter, r *http.Request) {
 		items[i] = paymentToResponse(p)
 	}
 
-	writeJSON(w, http.StatusOK, items)
+	writeJSON(w, http.StatusOK, NewPaginatedResponse(items, total, page))
 }

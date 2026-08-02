@@ -2908,15 +2908,21 @@ paths:
         in: query
         name: date_to
         type: string
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Rows per page (default 50, max 200)
+        in: query
+        name: pageSize
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/internal_handlers.PaymentResponse'
-            type: array
+            $ref: '#/definitions/internal_handlers.PaginatedResponse'
         "500":
           description: Internal Server Error
           schema:
@@ -3317,15 +3323,21 @@ paths:
         in: query
         name: tp
         type: integer
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Rows per page (default 50, max 200)
+        in: query
+        name: pageSize
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/vetapp-backend_internal_models.Procedure'
-            type: array
+            $ref: '#/definitions/internal_handlers.PaginatedResponse'
         "500":
           description: Internal Server Error
           schema:
@@ -3618,15 +3630,21 @@ paths:
         in: query
         name: date_to
         type: string
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Rows per page (default 50, max 200)
+        in: query
+        name: pageSize
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/internal_handlers.ShopResponse'
-            type: array
+            $ref: '#/definitions/internal_handlers.PaginatedResponse'
         "500":
           description: Internal Server Error
           schema:

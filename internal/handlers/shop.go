@@ -68,7 +68,9 @@ func shopToResponse(s models.Shop) ShopResponse {
 // @Param clinic query string false "Clinic code"
 // @Param date_from query string false "Start date (YYYY-MM-DD)"
 // @Param date_to query string false "End date (YYYY-MM-DD)"
-// @Success 200 {array} ShopResponse
+// @Param page query int false "Page number (default 1)"
+// @Param pageSize query int false "Rows per page (default 50, max 200)"
+// @Success 200 {object} PaginatedResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /shop [get]
 func (h *ShopHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -89,8 +91,14 @@ func (h *ShopHandler) List(w http.ResponseWriter, r *http.Request) {
 		query = query.Where("date <= ?", dateTo)
 	}
 
+	// Paginated: 9,260 rows for the busiest clinic without a bound.
+	page := ParsePageParams(r)
+
+	var total int64
+	query.Count(&total)
+
 	var sales []models.Shop
-	if err := query.Order("date DESC, id DESC").Find(&sales).Error; err != nil {
+	if err := page.Paginate(query).Order("date DESC, id DESC").Find(&sales).Error; err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to fetch sales"})
 		return
 	}
@@ -100,7 +108,7 @@ func (h *ShopHandler) List(w http.ResponseWriter, r *http.Request) {
 		items[i] = shopToResponse(s)
 	}
 
-	writeJSON(w, http.StatusOK, items)
+	writeJSON(w, http.StatusOK, NewPaginatedResponse(items, total, page))
 }
 
 // Create adds a new sale.
