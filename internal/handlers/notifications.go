@@ -111,7 +111,7 @@ func (h *NotificationHandler) SendReminders(w http.ResponseWriter, r *http.Reque
 	var birthdays []phoneRow
 	h.db.Raw(`SELECT p.phone, p.name FROM pets p
 		WHERE SUBSTRING(p.happy FROM 6) = TO_CHAR(CURRENT_DATE, 'MM-DD')
-		AND p.status = 1
+		AND p.status = '1'
 		AND p.birth2 >= CURRENT_DATE::text
 		AND TRIM(COALESCE(p.phone,'')) != ''`).Scan(&birthdays)
 
@@ -129,12 +129,27 @@ func (h *NotificationHandler) SendReminders(w http.ResponseWriter, r *http.Reque
 		Name   string
 		TPName string
 	}
+	// `date3` is NOT a status flag — it mirrors the reminder date
+	// `date2` in the legacy comma format ("2027,03,18"), and legacy rows
+	// also carry sentinels like ",-1,". CAST(date3 AS int) therefore
+	// threw at runtime ("invalid input syntax for type integer: ,-1,"),
+	// so this endpoint has never sent a reminder. The same
+	// misunderstanding hid owner-created reminders from the calendar —
+	// see OwnerPortalHandler.Calendar.
+	//
+	// Reminders are simply the records whose reminder date is three days
+	// out, for pets with an active subscription and a phone number.
+	//
+	// `pets.status` is TEXT holding digit strings ('1' active, '2'
+	// unregistered, '3' expired), so the literal is quoted — comparing
+	// it to a bare integer raised "operator does not exist: text =
+	// integer" and would have kept this endpoint broken even after the
+	// date3 fix.
 	h.db.Raw(`SELECT p.phone, p.name, v.tpname
 		FROM vaccination v
 		JOIN pets p ON v.uuid = p.id::text
 		WHERE v.date2 = (CURRENT_DATE + INTERVAL '3 days')::text
-		AND CAST(v.date3 AS int) > 2
-		AND p.status = 1
+		AND p.status = '1'
 		AND p.birth2 >= CURRENT_DATE::text
 		AND TRIM(COALESCE(p.phone,'')) != ''`).Scan(&reminders)
 
