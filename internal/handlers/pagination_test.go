@@ -60,9 +60,9 @@ func TestParsePageParamsNeverExceedsCap(t *testing.T) {
 
 func TestNewPaginatedResponse(t *testing.T) {
 	cases := []struct {
-		total      int64
-		pageSize   int
-		wantPages  int
+		total     int64
+		pageSize  int
+		wantPages int
 	}{
 		{0, 50, 0},
 		{1, 50, 1},
