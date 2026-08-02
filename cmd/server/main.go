@@ -59,9 +59,10 @@ func main() {
 	emailService := services.NewEmailService(cfg)
 	ipayService := services.NewIPayService(cfg)
 	bogService := services.NewBOGService(cfg)
+	storageService := services.NewStorageService(cfg)
 
 	// Setup router with all routes
-	r := router.Setup(db, authService, smsService, emailService, ipayService, bogService, cfg.PaymentProvider, cfg.BaseURL, cfg.EmailVerifyBaseURL)
+	r := router.Setup(db, authService, smsService, emailService, ipayService, bogService, storageService, cfg.PaymentProvider, cfg.BaseURL, cfg.EmailVerifyBaseURL)
 
 	// Start server
 	addr := ":" + cfg.Port

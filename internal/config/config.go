@@ -75,6 +75,18 @@ type Config struct {
 	// silently keep using the deprecated gateway.
 	PaymentProvider string
 
+	// Supabase Storage — holds procedure attachments (lab results,
+	// scans). The bucket is private; the service-role key never leaves
+	// the server and downloads are served via short-lived signed URLs.
+	//
+	// SupabaseURL is the project URL (https://<ref>.supabase.co).
+	// SupabaseServiceKey is the service_role key from
+	// Project Settings → API. It bypasses row-level security, so it
+	// must never be shipped to a client.
+	SupabaseURL        string
+	SupabaseServiceKey string
+	SupabaseBucket     string
+
 	// Public base URL (for payment callbacks etc.)
 	BaseURL string
 }
@@ -113,6 +125,9 @@ func Load() (*Config, error) {
 		BOGAPIURL:          getEnv("BOG_API_URL", "https://api.bog.ge"),
 		BOGAuthURL:         getEnv("BOG_AUTH_URL", "https://oauth2.bog.ge"),
 		BOGPublicKey:       getEnv("BOG_PUBLIC_KEY", ""),
+		SupabaseURL:        getEnv("SUPABASE_URL", ""),
+		SupabaseServiceKey: getEnv("SUPABASE_SERVICE_KEY", ""),
+		SupabaseBucket:     getEnv("SUPABASE_BUCKET", "procedure-files"),
 		BaseURL:            getEnv("BASE_URL", "http://localhost:8080"),
 	}
 

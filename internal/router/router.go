@@ -62,7 +62,7 @@ func allowedOrigins() []string {
 // falls back to the legacy iPay gateway rather than failing checkouts.
 // `paymentProvider` selects which gateway NEW checkouts use ("bog" or
 // "ipay") — see config.PaymentProvider.
-func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.SMSService, emailService *services.EmailService, ipayService *services.IPayService, bogService *services.BOGService, paymentProvider, baseURL, emailVerifyBaseURL string) *chi.Mux {
+func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.SMSService, emailService *services.EmailService, ipayService *services.IPayService, bogService *services.BOGService, storageService *services.StorageService, paymentProvider, baseURL, emailVerifyBaseURL string) *chi.Mux {
 	r := chi.NewRouter()
 
 	// --- Global middleware ---
@@ -102,6 +102,7 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 	subHandler := handlers.NewSubscriptionHandler(db, ipayService, bogService, paymentProvider, baseURL)
 	notifHandler := handlers.NewNotificationHandler(db, smsService)
 	publicHandler := handlers.NewPublicHandler(db)
+	procFileHandler := handlers.NewProcedureFileHandler(db, storageService)
 
 	// --- Swagger UI ---
 	r.Get("/swagger/*", httpSwagger.WrapHandler)
@@ -292,6 +293,13 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 			r.Get("/pets/{id}/procedures", ownerPortalHandler.Procedures)
 			r.Post("/pets/{id}/procedures", ownerPortalHandler.CreateProcedure)
 			r.Delete("/pets/{id}/procedures/{procId}", ownerPortalHandler.DeleteProcedure)
+			// Attachments (lab results, scans). Scoped under the
+			// procedure so ownership is checked from the path on every
+			// call — see ProcedureFileHandler.
+			r.Get("/pets/{id}/procedures/{procId}/files", procFileHandler.List)
+			r.Post("/pets/{id}/procedures/{procId}/files", procFileHandler.Upload)
+			r.Get("/pets/{id}/procedures/{procId}/files/{fileId}", procFileHandler.Download)
+			r.Delete("/pets/{id}/procedures/{procId}/files/{fileId}", procFileHandler.Delete)
 			// Diseases / allergies live in the separate `eals` table, not
 			// in the `vaccination` table — exposed via its own endpoint
 			// so the mobile app doesn't have to encode the legacy

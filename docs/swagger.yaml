@@ -1248,6 +1248,22 @@ definitions:
     - name
     - type
     type: object
+  internal_handlers.ProcedureFileResponse:
+    properties:
+      contentType:
+        type: string
+      createdAt:
+        type: string
+      fileName:
+        type: string
+      id:
+        type: integer
+      sizeBytes:
+        type: integer
+    required:
+    - fileName
+    - id
+    type: object
   internal_handlers.ProcedureTypeItem:
     properties:
       name:
@@ -2631,6 +2647,145 @@ paths:
       security:
       - BearerAuth: []
       summary: Owner deletes self-added procedure
+      tags:
+      - owner
+  /owner/pets/{id}/procedures/{procId}/files:
+    get:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Procedure ID
+        in: path
+        name: procId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.ProcedureFileResponse'
+            type: array
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List procedure attachments
+      tags:
+      - owner
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Procedure ID
+        in: path
+        name: procId
+        required: true
+        type: integer
+      - description: File to attach
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handlers.ProcedureFileResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Upload a procedure attachment
+      tags:
+      - owner
+  /owner/pets/{id}/procedures/{procId}/files/{fileId}:
+    delete:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Procedure ID
+        in: path
+        name: procId
+        required: true
+        type: integer
+      - description: File ID
+        in: path
+        name: fileId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MessageResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete a procedure attachment
+      tags:
+      - owner
+    get:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Procedure ID
+        in: path
+        name: procId
+        required: true
+        type: integer
+      - description: File ID
+        in: path
+        name: fileId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a download link for an attachment
       tags:
       - owner
   /owner/visits:

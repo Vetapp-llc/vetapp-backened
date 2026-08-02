@@ -36,7 +36,7 @@ func routes(t *testing.T, r chi.Routes) map[string]bool {
 // TestAuthenticatedAuthRoutesAreReachable pins the endpoints the mobile
 // app depends on for profile + credential management.
 func TestAuthenticatedAuthRoutesAreReachable(t *testing.T) {
-	r := Setup(nil, nil, nil, nil, nil, nil, "ipay", "http://localhost:8080", "")
+	r := Setup(nil, nil, nil, nil, nil, nil, nil, "ipay", "http://localhost:8080", "")
 	found := routes(t, r)
 
 	for _, want := range []string{
@@ -54,7 +54,7 @@ func TestAuthenticatedAuthRoutesAreReachable(t *testing.T) {
 // TestPublicAuthRoutesAreReachable guards the other half: the fix for
 // the above must not shadow the unauthenticated entry points.
 func TestPublicAuthRoutesAreReachable(t *testing.T) {
-	r := Setup(nil, nil, nil, nil, nil, nil, "ipay", "http://localhost:8080", "")
+	r := Setup(nil, nil, nil, nil, nil, nil, nil, "ipay", "http://localhost:8080", "")
 	found := routes(t, r)
 
 	for _, want := range []string{
@@ -75,7 +75,7 @@ func TestPublicAuthRoutesAreReachable(t *testing.T) {
 // TestOwnerPortalRoutesAreReachable covers the rest of the mobile
 // app's surface — every screen in the owner app maps to one of these.
 func TestOwnerPortalRoutesAreReachable(t *testing.T) {
-	r := Setup(nil, nil, nil, nil, nil, nil, "ipay", "http://localhost:8080", "")
+	r := Setup(nil, nil, nil, nil, nil, nil, nil, "ipay", "http://localhost:8080", "")
 	found := routes(t, r)
 
 	for _, want := range []string{
@@ -95,6 +95,10 @@ func TestOwnerPortalRoutesAreReachable(t *testing.T) {
 		"GET /api/procedures/test-options",
 		"GET /api/procedures/dehel-options",
 		"GET /api/procedures/ecto-options",
+		"GET /api/owner/pets/{id}/procedures/{procId}/files",
+		"POST /api/owner/pets/{id}/procedures/{procId}/files",
+		"GET /api/owner/pets/{id}/procedures/{procId}/files/{fileId}",
+		"DELETE /api/owner/pets/{id}/procedures/{procId}/files/{fileId}",
 		"POST /api/subscriptions/checkout",
 		"POST /api/subscriptions/apple-verify",
 	} {
