@@ -204,6 +204,13 @@ definitions:
     properties:
       order_id:
         type: string
+      provider:
+        description: |-
+          Provider tells the client which gateway served this checkout
+          ("bog" or "ipay"). Clients shouldn't branch on it for the happy
+          path — both are a WebView redirect — but it makes support
+          tickets and client-side logs far easier to trace back.
+        type: string
       redirect_url:
         type: string
     required:
@@ -429,7 +436,14 @@ definitions:
     type: object
   internal_handlers.CreateShopRequest:
     properties:
+      comment:
+        type: string
       date:
+        type: string
+      method:
+        enum:
+        - card
+        - cash
         type: string
       name:
         type: string
@@ -792,7 +806,7 @@ definitions:
         type: boolean
       categories:
         items:
-          $ref: '#/definitions/internal_handlers.OwnerProcedureCategoryCount'
+          $ref: '#/definitions/internal_handlers.ProcedureCategoryCount'
         type: array
       chip:
         type: string
@@ -870,15 +884,6 @@ definitions:
     - species
     - subscriptionStatus
     type: object
-  internal_handlers.OwnerProcedureCategoryCount:
-    properties:
-      count:
-        type: integer
-      name:
-        type: string
-      tp:
-        type: integer
-    type: object
   internal_handlers.OwnerProcedureItem:
     properties:
       addedByOwner:
@@ -886,6 +891,9 @@ definitions:
         type: boolean
       anamnesis:
         description: tp=10x/20x — anamnesis. tp=1/2 — also surfaced if set.
+        type: string
+      clinicName:
+        description: resolved clinic name via `sk` -> memberlogin_members.company_name
         type: string
       comment:
         type: string
@@ -968,11 +976,32 @@ definitions:
         type: integer
       operation:
         type: string
+      petId:
+        description: |-
+          PetID / PetName identify which animal the visit is for — an owner
+          with several pets cannot otherwise tell them apart.
+        type: string
+      petName:
+        type: string
       status:
         type: string
       time:
         type: string
+      upcoming:
+        description: |-
+          Upcoming is true when the visit is today or later, so the client
+          doesn't have to re-implement date comparison against the server's
+          notion of "today".
+        type: boolean
+      vetFullName:
+        description: |-
+          VetFullName is the resolved human name, empty when the
+          appointment has no vet assigned yet.
+        type: string
       vetName:
+        description: |-
+          VetName is the raw `vetname` value (a member ID). Kept for
+          backwards compatibility; clients should display VetFullName.
         type: string
     required:
     - date
@@ -1064,20 +1093,14 @@ definitions:
         type: integer
       method:
         type: string
-      owner:
-        type: string
       uuid:
-        type: string
-      vet_id:
         type: string
     required:
     - amount
     - date
     - id
     - method
-    - owner
     - uuid
-    - vet_id
     type: object
   internal_handlers.PaymentTier:
     properties:
@@ -1392,22 +1415,23 @@ definitions:
     type: object
   internal_handlers.ShopResponse:
     properties:
+      comment:
+        type: string
       date:
         type: string
       id:
         type: integer
+      method:
+        type: string
       name:
         type: string
       price:
-        type: string
-      vetname:
         type: string
     required:
     - date
     - id
     - name
     - price
-    - vetname
     type: object
   internal_handlers.SpeciesCount:
     properties:
@@ -2721,10 +2745,6 @@ paths:
         in: query
         name: clinic
         type: string
-      - description: Vet member ID
-        in: query
-        name: vet_id
-        type: string
       - description: Start date (YYYY-MM-DD)
         in: query
         name: date_from
@@ -3856,7 +3876,7 @@ paths:
       consumes:
       - application/json
       parameters:
-      - description: iPay callback data
+      - description: Gateway callback data
         in: body
         name: body
         required: true
@@ -3877,7 +3897,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_handlers.ErrorResponse'
-      summary: iPay payment callback
+      summary: Card payment callback (BOG / iPay)
       tags:
       - subscriptions
   /subscriptions/checkout:

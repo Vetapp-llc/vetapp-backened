@@ -120,6 +120,7 @@ type OwnerProcedureItem struct {
 	Prescription  string            `json:"prescription"`                // dani column — prescription / დანიშნულება. Shown on every category.
 	VetName       string            `json:"vetName" validate:"required"` // raw column value (id or free-text)
 	VetFullName   string            `json:"vetFullName"`                 // resolved "First Last" via JOIN
+	ClinicName    string            `json:"clinicName"`                  // resolved clinic name via `sk` -> memberlogin_members.company_name
 	VaccineType   string            `json:"vaccineType"`                 // tp=1 — vaccine type ("კომპლექსური ვაქცინა")
 	Preparat      string            `json:"preparat"`                    // tp=1 — vaccine brand. tp=12 — dewormer drug.
 	Serial        string            `json:"serial"`                      // tp=1 — batch / serial number
@@ -222,6 +223,50 @@ func (h *OwnerPortalHandler) resolveVetNames(rawIDs []string) map[string]string 
 	for _, v := range vets {
 		if full := strings.TrimSpace(v.FirstName); full != "" {
 			names[v.ID] = full
+		}
+	}
+	return names
+}
+
+// resolveClinicNames maps clinic codes (`vaccination.sk`) to the
+// clinic's display name in one query.
+//
+// The clinic name lives on the vet accounts themselves:
+// `memberlogin_members.company_name` for rows whose `zip` equals the
+// code and whose group is Vet. Several staff share one clinic, so the
+// lookup collapses them with MAX() — the name is the same across rows.
+//
+// Names are trimmed because the legacy data has stray leading spaces
+// (" შპს ვეტექსი"), which would otherwise render as an indent.
+func (h *OwnerPortalHandler) resolveClinicNames(rawCodes []string) map[string]string {
+	codeSet := make(map[string]struct{}, len(rawCodes))
+	for _, raw := range rawCodes {
+		if key := strings.TrimSpace(raw); key != "" {
+			codeSet[key] = struct{}{}
+		}
+	}
+	names := make(map[string]string, len(codeSet))
+	if len(codeSet) == 0 {
+		return names
+	}
+
+	codes := make([]string, 0, len(codeSet))
+	for c := range codeSet {
+		codes = append(codes, c)
+	}
+	type clinicRow struct {
+		Zip         string
+		CompanyName string
+	}
+	var rows []clinicRow
+	h.db.Table("memberlogin_members").
+		Select("zip, MAX(company_name) AS company_name").
+		Where("zip IN ? AND group_id = ? AND COALESCE(company_name,'') <> ''", codes, models.RoleVet).
+		Group("zip").
+		Scan(&rows)
+	for _, r := range rows {
+		if n := strings.TrimSpace(r.CompanyName); n != "" {
+			names[strings.TrimSpace(r.Zip)] = n
 		}
 	}
 	return names
@@ -530,14 +575,17 @@ func (h *OwnerPortalHandler) Procedures(w http.ResponseWriter, r *http.Request) 
 	//     `last_name` is actually the Georgian personal ID — see
 	//     models/user.go. So display from `first_name` only.
 	rawVetIDs := make([]string, 0, len(procs))
+	rawClinicCodes := make([]string, 0, len(procs))
 	for _, p := range procs {
 		rawVetIDs = append(rawVetIDs, p.VetName)
+		rawClinicCodes = append(rawClinicCodes, p.SK)
 	}
 	vetNames := h.resolveVetNames(rawVetIDs)
+	clinicNames := h.resolveClinicNames(rawClinicCodes)
 
 	items := make([]OwnerProcedureItem, len(procs))
 	for i, p := range procs {
-		items[i] = buildOwnerProcedureItem(&p, vetNames)
+		items[i] = buildOwnerProcedureItem(&p, vetNames, clinicNames)
 	}
 
 	writeJSON(w, http.StatusOK, items)
@@ -556,7 +604,7 @@ func (h *OwnerPortalHandler) Procedures(w http.ResponseWriter, r *http.Request) 
 // DB value is missing, looks numeric, or doesn't match our category
 // table. Legacy records often have `tpname="1"` or stale variant
 // strings; this gives the UI a stable header line.
-func buildOwnerProcedureItem(p *models.Procedure, vetNames map[string]string) OwnerProcedureItem {
+func buildOwnerProcedureItem(p *models.Procedure, vetNames map[string]string, clinicNames map[string]string) OwnerProcedureItem {
 	vetKey := strings.TrimSpace(p.VetName)
 	// Owner-added if there's no associated vet (vetname empty / "0").
 	addedByOwner := vetKey == "" || vetKey == "0"
@@ -571,6 +619,7 @@ func buildOwnerProcedureItem(p *models.Procedure, vetNames map[string]string) Ow
 		Prescription:  cleanText(p.Dani),
 		VetName:       vetKey,
 		VetFullName:   vetNames[vetKey],
+		ClinicName:    clinicNames[strings.TrimSpace(p.SK)],
 		AddedByOwner:  addedByOwner,
 	}
 	if p.Date != "" {
@@ -1183,7 +1232,7 @@ func (h *OwnerPortalHandler) CreateProcedure(w http.ResponseWriter, r *http.Requ
 	// shape stays identical between create-201 and the next GET refresh.
 	// Pass an empty vetNames map — the owner-created record has no
 	// numeric vetname to resolve.
-	item := buildOwnerProcedureItem(&proc, map[string]string{})
+	item := buildOwnerProcedureItem(&proc, map[string]string{}, map[string]string{})
 	writeJSON(w, http.StatusCreated, item)
 }
 

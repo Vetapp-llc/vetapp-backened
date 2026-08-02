@@ -1668,12 +1668,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Vet member ID",
-                        "name": "vet_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
                         "description": "Start date (YYYY-MM-DD)",
                         "name": "date_from",
                         "in": "query"
@@ -3475,10 +3469,10 @@ const docTemplate = `{
                 "tags": [
                     "subscriptions"
                 ],
-                "summary": "iPay payment callback",
+                "summary": "Card payment callback (BOG / iPay)",
                 "parameters": [
                     {
-                        "description": "iPay callback data",
+                        "description": "Gateway callback data",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -3891,6 +3885,10 @@ const docTemplate = `{
                 "order_id": {
                     "type": "string"
                 },
+                "provider": {
+                    "description": "Provider tells the client which gateway served this checkout\n(\"bog\" or \"ipay\"). Clients shouldn't branch on it for the happy\npath — both are a WebView redirect — but it makes support\ntickets and client-side logs far easier to trace back.",
+                    "type": "string"
+                },
                 "redirect_url": {
                     "type": "string"
                 }
@@ -4219,8 +4217,18 @@ const docTemplate = `{
                 "price"
             ],
             "properties": {
+                "comment": {
+                    "type": "string"
+                },
                 "date": {
                     "type": "string"
+                },
+                "method": {
+                    "type": "string",
+                    "enum": [
+                        "card",
+                        "cash"
+                    ]
                 },
                 "name": {
                     "type": "string"
@@ -4765,7 +4773,7 @@ const docTemplate = `{
                 "categories": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/internal_handlers.OwnerProcedureCategoryCount"
+                        "$ref": "#/definitions/internal_handlers.ProcedureCategoryCount"
                     }
                 },
                 "chip": {
@@ -4858,20 +4866,6 @@ const docTemplate = `{
                 }
             }
         },
-        "internal_handlers.OwnerProcedureCategoryCount": {
-            "type": "object",
-            "properties": {
-                "count": {
-                    "type": "integer"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "tp": {
-                    "type": "integer"
-                }
-            }
-        },
         "internal_handlers.OwnerProcedureItem": {
             "type": "object",
             "required": [
@@ -4891,6 +4885,10 @@ const docTemplate = `{
                 },
                 "anamnesis": {
                     "description": "tp=10x/20x — anamnesis. tp=1/2 — also surfaced if set.",
+                    "type": "string"
+                },
+                "clinicName": {
+                    "description": "resolved clinic name via ` + "`" + `sk` + "`" + ` -\u003e memberlogin_members.company_name",
                     "type": "string"
                 },
                 "comment": {
@@ -5004,13 +5002,29 @@ const docTemplate = `{
                 "operation": {
                     "type": "string"
                 },
+                "petId": {
+                    "description": "PetID / PetName identify which animal the visit is for — an owner\nwith several pets cannot otherwise tell them apart.",
+                    "type": "string"
+                },
+                "petName": {
+                    "type": "string"
+                },
                 "status": {
                     "type": "string"
                 },
                 "time": {
                     "type": "string"
                 },
+                "upcoming": {
+                    "description": "Upcoming is true when the visit is today or later, so the client\ndoesn't have to re-implement date comparison against the server's\nnotion of \"today\".",
+                    "type": "boolean"
+                },
+                "vetFullName": {
+                    "description": "VetFullName is the resolved human name, empty when the\nappointment has no vet assigned yet.",
+                    "type": "string"
+                },
                 "vetName": {
+                    "description": "VetName is the raw ` + "`" + `vetname` + "`" + ` value (a member ID). Kept for\nbackwards compatibility; clients should display VetFullName.",
                     "type": "string"
                 }
             }
@@ -5124,9 +5138,7 @@ const docTemplate = `{
                 "date",
                 "id",
                 "method",
-                "owner",
-                "uuid",
-                "vet_id"
+                "uuid"
             ],
             "properties": {
                 "amount": {
@@ -5141,13 +5153,7 @@ const docTemplate = `{
                 "method": {
                     "type": "string"
                 },
-                "owner": {
-                    "type": "string"
-                },
                 "uuid": {
-                    "type": "string"
-                },
-                "vet_id": {
                     "type": "string"
                 }
             }
@@ -5608,23 +5614,25 @@ const docTemplate = `{
                 "date",
                 "id",
                 "name",
-                "price",
-                "vetname"
+                "price"
             ],
             "properties": {
+                "comment": {
+                    "type": "string"
+                },
                 "date": {
                     "type": "string"
                 },
                 "id": {
                     "type": "integer"
                 },
+                "method": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
                 "price": {
-                    "type": "string"
-                },
-                "vetname": {
                     "type": "string"
                 }
             }
