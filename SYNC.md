@@ -53,9 +53,10 @@ At cutover, do a final `--full` sync, then stop writing to MySQL.
 
 ## What the tool handles
 
-- **Passwords** are re-encrypted from the MySQL AES salt (`RZ8HU1EB`)
-  to the Supabase one (`DW3Z07FI`). `AES_SALT` in the backend must be
-  `DW3Z07FI` or no migrated customer can log in.
+- **Passwords** are re-encrypted from the legacy MySQL AES salt to the
+  Supabase one during the sync. The backend's `AES_SALT` must match the
+  Supabase salt or no migrated customer can log in — both values are in
+  the deployment environment, not in this repo.
 - **Binary columns** (AES ciphertext in `*.password`) are passed
   through as bytes. Forcing them through a Go string produced invalid
   UTF-8 that Postgres rejected (SQLSTATE 22021) — it silently failed

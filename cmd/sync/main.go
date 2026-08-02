@@ -47,16 +47,51 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-const (
-	mysqlDSN  = "vetappge_kobula131:chombe1981@tcp(91.239.207.27:3306)/vetappge_login"
-	mysqlSalt = "RZ8HU1EB"
-	pgSalt    = "DW3Z07FI"
-	pgDSN     = "host=aws-1-eu-central-1.pooler.supabase.com port=6543 user=postgres.qslnfhnnzsfmtnochnce password=Vetapp1234@. dbname=postgres sslmode=require default_query_exec_mode=simple_protocol"
+// Credentials come from the environment. They were previously hardcoded
+// here, which put the production MySQL and Supabase passwords in git
+// history — anyone with repository access had both databases.
+//
+// The salts are NOT secrets in the same sense (they are a fixed part of
+// the legacy AES scheme and are useless without a password column), so
+// they keep working defaults; the DSNs have none and the tool refuses
+// to start without them.
+//
+// Local use: put these in vetapp-backend/.env, which is gitignored.
+//
+//	SYNC_MYSQL_DSN  user:pass@tcp(host:3306)/dbname
+//	SYNC_PG_DSN     host=... port=6543 user=... password=... dbname=...
+var (
+	mysqlDSN  string
+	pgDSN     string
+	mysqlSalt string
+	pgSalt    string
 )
+
+// loadCredentials fills the DSNs from the environment.
+//
+// This runs from main() rather than as a package-level initialiser
+// because those execute BEFORE godotenv.Load(), so values from .env
+// would not be visible yet and the tool would refuse to start even with
+// a correctly populated file.
+func loadCredentials() {
+	mysqlDSN = os.Getenv("SYNC_MYSQL_DSN")
+	pgDSN = os.Getenv("SYNC_PG_DSN")
+	mysqlSalt = envOr("SYNC_MYSQL_SALT", "RZ8HU1EB")
+	pgSalt = envOr("SYNC_PG_SALT", "DW3Z07FI")
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
 
 // dryRun, when true, suppresses every write (TRUNCATE, INSERT) and
 // turns the tool into a row-count diff report.
@@ -76,6 +111,18 @@ func main() {
 	)
 	flag.Parse()
 	dryRun = *dr
+
+	// Pick up vetapp-backend/.env when run from the repo, so the tool
+	// works locally without exporting anything by hand.
+	_ = godotenv.Load(".env")
+	loadCredentials()
+
+	if mysqlDSN == "" || pgDSN == "" {
+		log.Fatal("SYNC_MYSQL_DSN and SYNC_PG_DSN must be set.\n" +
+			"  Add them to vetapp-backend/.env (gitignored) or export them:\n" +
+			"    SYNC_MYSQL_DSN=\"user:pass@tcp(host:3306)/dbname\"\n" +
+			"    SYNC_PG_DSN=\"host=... port=6543 user=... password=... dbname=postgres sslmode=require default_query_exec_mode=simple_protocol\"")
+	}
 	updateExisting = *update
 	// A full re-copy always rewrites every row, so upsert semantics are
 	// implied — and needed, because TRUNCATE may be skipped for tables

@@ -115,21 +115,15 @@ handles automatically — no env var needed.
 
 ## Test credentials
 
-**Pet owner (mobile app)** — `vetapp-mobile/creds.txt`
-
-```
-test@vetapp.ge / TestApp123
-```
+**Pet owner (mobile app)** — credentials are in
+`vetapp-mobile/creds.txt`, which is gitignored.
 
 5 pets: ქოფი, ფისო, ჩომბე active; რექსი, მიმი unregistered (so both
 subscription states are testable). Records include owner-reported and
 clinic-created procedures, plus 3 booked visits.
 
-**Clinic / vet (website)**
-
-```
-m.chkhikvishvili@yahoo.com / 555275507
-```
+**Clinic / vet (website)** — this is a real clinic account against the
+production database. Ask the team for it rather than committing it here.
 
 ⚠️ These accounts live in Supabase and can be destroyed by a sync — see
 `vetapp-backend/SYNC.md`.
