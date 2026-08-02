@@ -390,8 +390,38 @@ func (h *PetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} MedicalRecord
 // @Failure 500 {object} ErrorResponse
 // @Router /pets/{id}/history [get]
+// petBelongsToClinic reports whether the pet is registered to the
+// caller's clinic.
+//
+// Every handler that takes a pet id from the path MUST call this before
+// returning anything about that pet. `Get`, `Update` and `Delete`
+// enforced it inline while `History` and `Certificate` did not, which
+// let a vet at one clinic read another clinic's medical records by
+// changing the id — the ids are sequential, so enumeration was trivial.
+// Centralising the check is what stops that divergence recurring.
+func (h *PetHandler) petBelongsToClinic(r *http.Request, id string) bool {
+	claims := middleware.GetClaims(r)
+	if claims == nil || id == "" {
+		return false
+	}
+	// Admins are not clinic-scoped.
+	if claims.GroupID == models.RoleAdmin {
+		return true
+	}
+	var count int64
+	h.db.Model(&models.Pet{}).Where("id = ? AND vet = ?", id, claims.Zip).Count(&count)
+	return count > 0
+}
+
 func (h *PetHandler) History(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+
+	// 404 rather than 403: a distinct status would confirm which pet ids
+	// exist to someone probing ids they cannot access.
+	if !h.petBelongsToClinic(r, id) {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
+		return
+	}
 
 	var procedures []models.Procedure
 	if err := h.db.Where("uuid = ?", id).Order("date DESC, id DESC").Find(&procedures).Error; err != nil {
@@ -418,6 +448,11 @@ func (h *PetHandler) History(w http.ResponseWriter, r *http.Request) {
 // @Router /pets/{id}/certificate [get]
 func (h *PetHandler) Certificate(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+
+	if !h.petBelongsToClinic(r, id) {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
+		return
+	}
 
 	var pet models.Pet
 	if err := h.db.First(&pet, id).Error; err != nil {
