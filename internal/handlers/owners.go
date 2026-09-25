@@ -63,6 +63,17 @@ func (h *OwnerHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * pageSize
 
+	// An exact personal ID searches every clinic, like vet/search2.php: a
+	// pet registered elsewhere must be found (and counted) when its owner
+	// walks in. Only a whole-ID match crosses clinics; anything else falls
+	// through to browsing this clinic alone, so other clinics' owners
+	// cannot be listed by partial matches. IDs are not all 11 digits
+	// (9-digit, foreign and passport numbers exist), so no format check.
+	search = strings.TrimSpace(search)
+	if search != "" && h.exactOwnerLookup(w, search) {
+		return
+	}
+
 	// Build search condition
 	searchCond := ""
 	args := []interface{}{claims.Zip}
@@ -141,7 +152,7 @@ func (h *OwnerHandler) List(w http.ResponseWriter, r *http.Request) {
 // @Router /owners/{personalId} [get]
 func (h *OwnerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	personalID := chi.URLParam(r, "personalId")
-	claims := middleware.GetClaims(r)
+	personalID = strings.TrimSpace(personalID)
 
 	// Strip leading zeros for uuid numeric comparison (bigint strips them on storage)
 	trimmedID := strings.TrimLeft(personalID, "0")
@@ -149,12 +160,13 @@ func (h *OwnerHandler) Get(w http.ResponseWriter, r *http.Request) {
 		trimmedID = "0"
 	}
 
-	// Look up by uuid (the owner's actual personal ID) — scoped to current clinic
+	// Exact personal-ID lookup across every clinic, as vet/search2.php did:
+	// a pet registered elsewhere must be found when it walks in. Exact
+	// match only, so this cannot enumerate other clinics' owners.
+	// TRIM matches the expression index and legacy IDs with stray spaces.
 	var pets []models.Pet
-	if err := h.db.Where(
-		"vet = ? AND (uuid::text = ? OR uuid::text = ?)",
-		claims.Zip, personalID, trimmedID,
-	).Order("id DESC").Find(&pets).Error; err != nil || len(pets) == 0 {
+	if err := h.db.Where("TRIM(uuid) IN ?", []string{personalID, trimmedID}).
+		Order("id DESC").Limit(200).Find(&pets).Error; err != nil || len(pets) == 0 {
 		log := middleware.RequestLogger(r)
 		log.Warn("owner_not_found", "personal_id", personalID)
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "owner not found"})
@@ -192,4 +204,25 @@ func (h *OwnerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, owner)
+}
+
+// exactOwnerLookup writes the one owner with exactly this personal ID,
+// across all clinics with every pet counted, and reports whether there
+// was one (uses the TRIM(uuid) index).
+func (h *OwnerHandler) exactOwnerLookup(w http.ResponseWriter, personalID string) bool {
+	trimmed := strings.TrimLeft(personalID, "0")
+	var row struct {
+		Name     string
+		Phone    string
+		Email    string
+		PetCount int `gorm:"column:pet_count"`
+	}
+	h.db.Raw(`SELECT MAX(first_name) AS name, MAX(phone) AS phone, MAX(email) AS email, COUNT(*)::int AS pet_count
+		FROM pets WHERE TRIM(uuid) IN (?, ?)`, personalID, trimmed).Scan(&row)
+	if row.PetCount == 0 {
+		return false
+	}
+	owners := []OwnerItem{{PersonalID: personalID, Name: row.Name, Phone: row.Phone, Email: row.Email, PetCount: row.PetCount}}
+	writeJSON(w, http.StatusOK, PaginatedResponse{Data: owners, Total: 1, Page: 1, PageSize: 1, TotalPages: 1})
+	return true
 }

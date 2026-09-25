@@ -27,11 +27,43 @@ import (
 type ProcedureFileHandler struct {
 	db      *gorm.DB
 	storage *services.StorageService
+	// clinic selects the authorisation rule: false = the owner app (the
+	// caller owns the pet), true = the clinic portal (the procedure was
+	// recorded by the caller's clinic) — lab results the clinic attaches,
+	// replacing vet/upload77.php.
+	clinic bool
 }
 
-// NewProcedureFileHandler creates a ProcedureFileHandler.
+// NewProcedureFileHandler creates the owner-app ProcedureFileHandler.
 func NewProcedureFileHandler(db *gorm.DB, storage *services.StorageService) *ProcedureFileHandler {
 	return &ProcedureFileHandler{db: db, storage: storage}
+}
+
+// NewClinicProcedureFileHandler creates the clinic-portal handler.
+func NewClinicProcedureFileHandler(db *gorm.DB, storage *services.StorageService) *ProcedureFileHandler {
+	return &ProcedureFileHandler{db: db, storage: storage, clinic: true}
+}
+
+// allowed reports whether the caller may see and change the files on
+// procedure procID of pet petID. The procedure must belong to the pet in
+// both modes, so a file can never be attached to a record the caller
+// cannot see.
+func (h *ProcedureFileHandler) allowed(r *http.Request, petID, procID string) bool {
+	if petID == "" || procID == "" {
+		return false
+	}
+	if !h.clinic {
+		if !h.ownsPet(r, petID) {
+			return false
+		}
+		var n int64
+		h.db.Model(&models.Procedure{}).Where("id = ? AND uuid = ?", procID, petID).Count(&n)
+		return n > 0
+	}
+	var n int64
+	ownedByCaller(h.db.Model(&models.Procedure{}), r, "sk").
+		Where("id = ? AND uuid = ?", procID, petID).Count(&n)
+	return n > 0
 }
 
 // signedURLTTL bounds how long a download link stays valid. The URL is
@@ -89,7 +121,7 @@ func (h *ProcedureFileHandler) List(w http.ResponseWriter, r *http.Request) {
 	petID := chi.URLParam(r, "id")
 	procID := chi.URLParam(r, "procId")
 
-	if !h.ownsPet(r, petID) {
+	if !h.allowed(r, petID, chi.URLParam(r, "procId")) {
 		// 404 rather than 403 so the endpoint doesn't confirm whether a
 		// pet id exists for someone probing ids they don't own.
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
@@ -133,7 +165,7 @@ func (h *ProcedureFileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if !h.ownsPet(r, petID) {
+	if !h.allowed(r, petID, chi.URLParam(r, "procId")) {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
 		return
 	}
@@ -244,7 +276,7 @@ func (h *ProcedureFileHandler) Download(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
-	if !h.ownsPet(r, petID) {
+	if !h.allowed(r, petID, chi.URLParam(r, "procId")) {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
 		return
 	}
@@ -253,7 +285,7 @@ func (h *ProcedureFileHandler) Download(w http.ResponseWriter, r *http.Request) 
 	// without this an owner could read another owner's attachment by
 	// guessing.
 	var rec models.ProcedureFile
-	if err := h.db.Where("id = ? AND pet_id = ?", fileID, petID).First(&rec).Error; err != nil {
+	if err := h.db.Where("id = ? AND pet_id = ? AND procedure_id = ?", fileID, petID, chi.URLParam(r, "procId")).First(&rec).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "file not found"})
 			return
@@ -292,13 +324,13 @@ func (h *ProcedureFileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	petID := chi.URLParam(r, "id")
 	fileID := chi.URLParam(r, "fileId")
 
-	if !h.ownsPet(r, petID) {
+	if !h.allowed(r, petID, chi.URLParam(r, "procId")) {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
 		return
 	}
 
 	var rec models.ProcedureFile
-	if err := h.db.Where("id = ? AND pet_id = ?", fileID, petID).First(&rec).Error; err != nil {
+	if err := h.db.Where("id = ? AND pet_id = ? AND procedure_id = ?", fileID, petID, chi.URLParam(r, "procId")).First(&rec).Error; err != nil {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "file not found"})
 		return
 	}

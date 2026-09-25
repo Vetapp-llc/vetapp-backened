@@ -103,6 +103,8 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 	notifHandler := handlers.NewNotificationHandler(db, smsService)
 	publicHandler := handlers.NewPublicHandler(db)
 	procFileHandler := handlers.NewProcedureFileHandler(db, storageService)
+	adminHandler := handlers.NewAdminHandler(db)
+	clinicFileHandler := handlers.NewClinicProcedureFileHandler(db, storageService)
 
 	// --- Swagger UI ---
 	r.Get("/swagger/*", httpSwagger.WrapHandler)
@@ -135,6 +137,7 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 		// regardless of the token supplied.
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.Auth(authService))
+			r.Use(middleware.ActiveAccount(db))
 			r.Get("/me", authHandler.Me)
 			r.Put("/me", authHandler.UpdateMe)
 			// In-app password rotation (settings → security → change
@@ -157,6 +160,7 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 	// --- Protected routes (JWT required) ---
 	r.Route("/api", func(r chi.Router) {
 		r.Use(middleware.Auth(authService))
+		r.Use(middleware.ActiveAccount(db))
 
 		// Auth - authenticated routes are registered on the /api/auth
 		// subrouter above (see the comment there); mounting them here
@@ -172,6 +176,11 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 			r.Delete("/{id}", petHandler.Delete)
 			r.Get("/{id}/history", petHandler.History)
 			r.Get("/{id}/certificate", petHandler.Certificate)
+			// Lab results and scans attached by the clinic (vet/upload77.php).
+			r.Get("/{id}/procedures/{procId}/files", clinicFileHandler.List)
+			r.Post("/{id}/procedures/{procId}/files", clinicFileHandler.Upload)
+			r.Get("/{id}/procedures/{procId}/files/{fileId}", clinicFileHandler.Download)
+			r.Delete("/{id}/procedures/{procId}/files/{fileId}", clinicFileHandler.Delete)
 		})
 
 		// Owners - vet/admin only
@@ -186,6 +195,7 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 		// Authenticated but no role gate, so the owner mobile app can
 		// populate its dropdowns when self-recording procedures.
 		r.Get("/procedures/types", procHandler.Types)
+		r.Get("/procedures/forms", procHandler.Forms)
 		r.Get("/procedures/vaccine-options", procHandler.VaccineOptions)
 		r.Get("/procedures/test-options", procHandler.TestOptions)
 		r.Get("/procedures/dehel-options", procHandler.DehelOptions)
@@ -207,8 +217,8 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 				r.Use(middleware.RequireRole(models.RoleVet, models.RoleAdmin))
 				r.Get("/clinic", statsHandler.Clinic)
 				r.Get("/clinic/daily", statsHandler.DailyClinic)
-			r.Get("/clinic/monthly", statsHandler.MonthlyClinic)
-			r.Get("/clinic/yearly", statsHandler.YearlyClinic)
+				r.Get("/clinic/monthly", statsHandler.MonthlyClinic)
+				r.Get("/clinic/yearly", statsHandler.YearlyClinic)
 			})
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireRole(models.RoleAdmin))
@@ -223,9 +233,21 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 			r.Post("/apple-verify", subHandler.AppleVerify)
 		})
 
+		// Super-admin account pages (superadmin/owners.php, dep.php, trans.php)
+		r.Route("/admin", func(r chi.Router) {
+			r.Use(middleware.RequireRole(models.RoleAdmin))
+			r.Get("/members", adminHandler.Members)
+			r.Delete("/members/{id}", adminHandler.DisableMember)
+			r.Get("/transactions", adminHandler.Transactions)
+		})
+
+		// Owners who used this clinic's promo code (vet/promo.php)
+		r.With(middleware.RequireRole(models.RoleVet, models.RoleAdmin)).Get("/promo", adminHandler.Promo)
+
 		// Notifications - admin only
 		r.Route("/notifications", func(r chi.Router) {
 			r.Use(middleware.RequireRole(models.RoleAdmin))
+			r.Get("/sms/reminders", notifHandler.PreviewReminders)
 			r.Post("/sms/reminders", notifHandler.SendReminders)
 		})
 
@@ -274,9 +296,9 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 			r.Delete("/{id}", shopHandler.Delete)
 		})
 
-		// Staff - admin only
+		// Staff - each clinic manages its own vets (vet/vets.php), admins any
 		r.Route("/staff", func(r chi.Router) {
-			r.Use(middleware.RequireRole(models.RoleAdmin))
+			r.Use(middleware.RequireRole(models.RoleVet, models.RoleAdmin))
 			r.Get("/", staffHandler.List)
 			r.Post("/", staffHandler.Create)
 			r.Put("/{id}", staffHandler.Update)
@@ -306,6 +328,11 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 			// "tp=999 means allergies" hack.
 			r.Get("/pets/{id}/diseases", ownerPortalHandler.Diseases)
 			r.Get("/pets/{id}/code", ownerPortalHandler.GenerateCode)
+			// At-home treatments (owner/homep.php)
+			r.Get("/pets/{id}/home-procedures", ownerPortalHandler.HomeProcedures)
+			r.Post("/pets/{id}/home-procedures", ownerPortalHandler.CreateHomeProcedure)
+			r.Post("/pets/{id}/home-procedures/{hpId}/done", ownerPortalHandler.MarkHomeProcedureDone)
+			r.Delete("/pets/{id}/home-procedures/{hpId}", ownerPortalHandler.DeleteHomeProcedure)
 			r.Get("/calendar", ownerPortalHandler.Calendar)
 			r.Get("/visits", ownerPortalHandler.Visits)
 		})

@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
+	"strings"
 
 	"vetapp-backend/internal/middleware"
 	"vetapp-backend/internal/models"
@@ -31,7 +31,7 @@ type CreateStaffRequest struct {
 	LastName  string `json:"last_name" validate:"required"`
 	Email     string `json:"email" validate:"required,email"`
 	Phone     string `json:"phone"`
-	Password  string `json:"password" validate:"required,min=1"`
+	Password  string `json:"password" validate:"required,min=6"`
 }
 
 // StaffResponse is the API response for a staff member.
@@ -63,15 +63,14 @@ func staffToResponse(u models.User) StaffResponse {
 // @Failure 500 {object} ErrorResponse
 // @Router /staff [get]
 func (h *StaffHandler) List(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.GetClaims(r)
-
-	clinic := r.URL.Query().Get("clinic")
-	if clinic == "" {
-		clinic = claims.Zip
+	clinic, ok := resolveClinic(w, r)
+	if !ok {
+		return
 	}
 
+	// Removed staff keep their rows (see Delete) but are not listed.
 	var users []models.User
-	if err := h.db.Where("zip = ? AND group_id = ?", clinic, models.RoleVet).
+	if err := h.db.Where("zip = ? AND group_id = ? AND status = ?", clinic, models.RoleVet, "T").
 		Order("first_name ASC").Find(&users).Error; err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to fetch staff"})
 		return
@@ -86,17 +85,6 @@ func (h *StaffHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 // Create adds a new staff member (creates a user with group_id=2).
-// @Summary Add staff member
-// @Tags staff
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param body body CreateStaffRequest true "Staff data"
-// @Success 201 {object} StaffResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 409 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /staff [post]
 func (h *StaffHandler) Create(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
 
@@ -105,29 +93,40 @@ func (h *StaffHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
+	if claims.Zip == "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "this account has no clinic"})
+		return
+	}
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 
-	// Check if email already exists
-	var existing models.User
-	if err := h.db.Where("email = ?", req.Email).First(&existing).Error; err == nil {
+	if h.emailTaken(req.Email, 0) {
 		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "email already registered"})
 		return
 	}
 
+	// Both encodings: the AES blob is what the PHP app (and the MySQL →
+	// Supabase sync) understands; bcrypt is what this backend prefers.
 	encryptedBytes, err := h.authService.EncryptPassword(req.Password)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to encrypt password"})
+		return
+	}
+	hash, err := h.authService.HashPassword(req.Password)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to encrypt password"})
 		return
 	}
 
 	user := models.User{
-		FirstName: req.FirstName,
-		LastName:  req.LastName,
-		Email:     req.Email,
-		Phone:     req.Phone,
-		Password:  encryptedBytes,
-		GroupID:   models.RoleVet,
-		Zip:       claims.Zip,
-		Status:    "T",
+		FirstName:    strings.TrimSpace(req.FirstName),
+		LastName:     strings.TrimSpace(req.LastName),
+		Email:        req.Email,
+		Phone:        req.Phone,
+		Password:     encryptedBytes,
+		PasswordHash: hash,
+		GroupID:      models.RoleVet,
+		Zip:          claims.Zip,
+		Status:       "T",
 	}
 
 	if err := h.db.Create(&user).Error; err != nil {
@@ -138,76 +137,109 @@ func (h *StaffHandler) Create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, staffToResponse(user))
 }
 
-// Update edits an existing staff member.
-// @Summary Update staff member
-// @Tags staff
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param id path int true "Staff member ID"
-// @Param body body object true "Fields to update"
-// @Success 200 {object} StaffResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /staff/{id} [put]
-func (h *StaffHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	claims := middleware.GetClaims(r)
+// emailTaken reports whether an active account other than exceptID uses
+// the address. Removed staff (status F, email prefixed) do not count.
+func (h *StaffHandler) emailTaken(email string, exceptID uint) bool {
+	var n int64
+	h.db.Model(&models.User{}).
+		Where("LOWER(email) = ? AND status = ? AND id <> ?", strings.ToLower(email), "T", exceptID).
+		Count(&n)
+	return n > 0
+}
 
+// UpdateStaffRequest mirrors vet/updatevet.php: name, personal ID, phone
+// and email. Password, role, clinic and status are never editable here.
+type UpdateStaffRequest struct {
+	FirstName *string `json:"first_name"`
+	LastName  *string `json:"last_name"`
+	Phone     *string `json:"phone"`
+	Email     *string `json:"email" validate:"omitempty,email"`
+}
+
+func (h *StaffHandler) findStaff(r *http.Request) (models.User, bool) {
 	var user models.User
-	if err := h.db.Where("id = ? AND zip = ? AND group_id = ?", id, claims.Zip, models.RoleVet).
-		First(&user).Error; err != nil {
+	err := ownedByCaller(h.db, r, "zip").
+		Where("id = ? AND group_id = ? AND status = ?", chi.URLParam(r, "id"), models.RoleVet, "T").
+		First(&user).Error
+	return user, err == nil
+}
+
+// Update edits an existing staff member.
+func (h *StaffHandler) Update(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.findStaff(r)
+	if !ok {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "staff member not found"})
 		return
 	}
 
-	var updates map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid request body"})
+	var req UpdateStaffRequest
+	if err := decodeAndValidate(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
+	if req.FirstName != nil {
+		if strings.TrimSpace(*req.FirstName) == "" {
+			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "first_name is required"})
+			return
+		}
+		user.FirstName = strings.TrimSpace(*req.FirstName)
+	}
+	if req.LastName != nil {
+		user.LastName = strings.TrimSpace(*req.LastName)
+	}
+	if req.Phone != nil {
+		user.Phone = strings.TrimSpace(*req.Phone)
+	}
+	if req.Email != nil {
+		email := strings.ToLower(strings.TrimSpace(*req.Email))
+		if email != strings.ToLower(user.Email) && h.emailTaken(email, user.ID) {
+			writeJSON(w, http.StatusConflict, ErrorResponse{Error: "email already registered"})
+			return
+		}
+		user.Email = email
+	}
 
-	// Protect sensitive fields
-	delete(updates, "id")
-	delete(updates, "password")
-	delete(updates, "group_id")
-	delete(updates, "zip")
-
-	if err := h.db.Model(&user).Updates(updates).Error; err != nil {
+	if err := h.db.Model(&user).Select("first_name", "last_name", "phone", "email").Updates(&user).Error; err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to update staff member"})
 		return
 	}
-
-	h.db.First(&user, id)
 	writeJSON(w, http.StatusOK, staffToResponse(user))
 }
 
-// Delete removes a staff member.
-// @Summary Remove staff member
-// @Tags staff
-// @Produce json
-// @Security BearerAuth
-// @Param id path int true "Staff member ID"
-// @Success 200 {object} MessageResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /staff/{id} [delete]
-func (h *StaffHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	claims := middleware.GetClaims(r)
+// removedStaffZip and removedEmailPrefix are what vet/delatevet.php
+// writes when a clinic removes a vet. The row is kept so every record
+// that vet wrote (vaccination.vetname) still resolves to a name.
+const (
+	removedStaffZip    = "8888888888"
+	removedEmailPrefix = "13131313"
+)
 
-	var user models.User
-	if err := h.db.Where("id = ? AND zip = ? AND group_id = ?", id, claims.Zip, models.RoleVet).
-		First(&user).Error; err != nil {
+// Delete removes a staff member from the clinic without deleting the
+// account row: the email is prefixed (freeing the address and blocking
+// login), the clinic is replaced by PHP's sentinel and the status set
+// to F. A hard delete would orphan years of records attributed to them.
+func (h *StaffHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
+	user, ok := h.findStaff(r)
+	if !ok {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "staff member not found"})
 		return
 	}
-
-	if err := h.db.Delete(&user).Error; err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to delete staff member"})
+	if user.ID == claims.UserID {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "you cannot remove your own account"})
 		return
 	}
+
+	err := h.db.Model(&user).Updates(map[string]interface{}{
+		"email":  removedEmailPrefix + user.Email,
+		"zip":    removedStaffZip,
+		"status": "F",
+	}).Error
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to remove staff member"})
+		return
+	}
+	middleware.InvalidateAccount(user.ID)
 
 	writeJSON(w, http.StatusOK, MessageResponse{Message: "staff member removed"})
 }

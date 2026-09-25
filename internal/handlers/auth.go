@@ -22,6 +22,7 @@ import (
 // abuse (we pay per SMS) and basic brute force preparation.
 //   - Burst window: 60s, max 1 send per phone.
 //   - Daily window: 24h, max 5 sends per phone.
+//
 // Two limiters cover both rules; the stricter one wins.
 var (
 	otpSendBurstLimiter = middleware.NewRateLimiter(1, 60*time.Second)
@@ -101,8 +102,10 @@ type RegisterRequest struct {
 	Email     string `json:"email" validate:"required,email"`
 	Phone     string `json:"phone"`
 	Password  string `json:"password" validate:"required,min=1"`
-	GroupID   int    `json:"group_id"`
-	Zip       string `json:"zip"`
+	// GroupID and Zip are ignored: public sign-up always creates an owner.
+	// Kept so older clients still decode.
+	GroupID int    `json:"group_id"`
+	Zip     string `json:"zip"`
 }
 
 type RefreshRequest struct {
@@ -175,7 +178,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Find user by email
 	var user models.User
-	if err := h.db.Where("email = ?", req.Email).First(&user).Error; err != nil {
+	// Only active accounts may sign in. A removed vet keeps a row (with
+	// status F) and several legacy rows can share one address; without
+	// the status filter the lowest id won, disabled or not.
+	if err := h.db.Where("email = ? AND status = ?", req.Email, "T").First(&user).Error; err != nil {
 		log.Warn("login_failed", "email", req.Email, "reason", "user_not_found")
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid credentials"})
 		return
@@ -266,27 +272,52 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Default to owner role if not specified
-	groupID := req.GroupID
-	if groupID == 0 {
-		groupID = models.RoleOwner
+	// Public sign-up only ever creates a pet owner. It used to take
+	// group_id and zip from the request, so anyone could register as an
+	// administrator (group 4) or as a vet of any clinic (group 2 + zip).
+	// Vets are created by their clinic (POST /staff).
+	groupID := models.RoleOwner
+
+	// The personal ID is what links an owner to their pets (pets.uuid), so
+	// a second account on an ID already in use would see and edit the
+	// first owner's pets. Refuse it; the owner should sign in or reset
+	// their password instead.
+	// Disabled accounts count too: their ID still owns pets. The check
+	// and the insert below share an advisory lock on the ID, so two
+	// simultaneous sign-ups with one ID cannot both pass.
+	personalID := strings.TrimSpace(req.LastName)
+	tx := h.db.Begin()
+	defer tx.Rollback()
+	tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('register|' || ?))`, personalID)
+	var taken int64
+	tx.Model(&models.User{}).
+		Where("TRIM(last_name) = ? AND group_id = ?", personalID, models.RoleOwner).
+		Count(&taken)
+	if personalID == "" || taken > 0 {
+		log.Warn("register_failed", "email", req.Email, "reason", "personal_id_in_use")
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "an account with this personal ID already exists"})
+		return
 	}
 
 	user := models.User{
 		FirstName:    req.FirstName,
-		LastName:     req.LastName,
+		LastName:     personalID,
 		Email:        req.Email,
 		Phone:        req.Phone,
 		Password:     encryptedBytes,
 		PasswordHash: hash,
 		GroupID:      groupID,
-		Zip:          req.Zip,
+		Zip:          "",
 		Status:       "T",
 	}
 
-	if err := h.db.Create(&user).Error; err != nil {
+	if err := tx.Create(&user).Error; err != nil {
 		log.Error("register_failed", "email", req.Email, "reason", "db_error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to create user"})
+		return
+	}
+	if err := tx.Commit().Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to create account"})
 		return
 	}
 
@@ -335,7 +366,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	// Look up user
 	var user models.User
-	if err := h.db.First(&user, claims.UserID).Error; err != nil {
+	if err := h.db.Where("id = ? AND status = ?", claims.UserID, "T").First(&user).Error; err != nil {
 		log.Warn("refresh_failed", "user_id", claims.UserID, "reason", "user_not_found")
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "user not found"})
 		return
@@ -501,11 +532,11 @@ type ChangePasswordResponse struct {
 //
 // Validation:
 //
-//   • Body decodes + matches the validator constraints above.
-//   • `current_password` decrypts to the stored value (constant-time
+//   - Body decodes + matches the validator constraints above.
+//   - `current_password` decrypts to the stored value (constant-time
 //     compare via the AuthService helper would be nice; today it's a
 //     plain `==` because legacy decryption already happens in Login).
-//   • `new_password != current_password` — refuse a no-op rotation so
+//   - `new_password != current_password` — refuse a no-op rotation so
 //     accidental double-clicks don't surface "success" without change.
 //
 // On success: 200 {ok: true}. On any failure: 4xx with a generic
@@ -594,11 +625,11 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 //
 // The endpoint is intentionally lenient about its response shape:
 //
-//   • "sent"    — the email was handed off to Resend successfully.
-//   • "pending" — the service isn't configured (RESEND_API_KEY empty);
-//                 the request is still accepted so the mobile UI can
-//                 show "we got your request" without surfacing config
-//                 problems to end users.
+//   - "sent"    — the email was handed off to Resend successfully.
+//   - "pending" — the service isn't configured (RESEND_API_KEY empty);
+//     the request is still accepted so the mobile UI can
+//     show "we got your request" without surfacing config
+//     problems to end users.
 //
 // The mobile alert maps both cases to the same friendly message so the
 // user never sees "service not configured".
@@ -722,9 +753,9 @@ func (h *AuthHandler) SendEmailVerification(w http.ResponseWriter, r *http.Reque
 //
 // Token semantics:
 //
-//   • Must exist in email_verification_tokens.
-//   • used_at IS NULL.
-//   • expires_at > NOW().
+//   - Must exist in email_verification_tokens.
+//   - used_at IS NULL.
+//   - expires_at > NOW().
 //
 // On success: flip user.email_verified = TRUE, set used_at = NOW().
 // Idempotent if the user is already verified (we still 200 with the
@@ -1111,7 +1142,7 @@ func (h *AuthHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 
 	// Find user by phone
 	var user models.User
-	if err := h.db.Where("phone = ?", otp.Phone).First(&user).Error; err != nil {
+	if err := h.db.Where("phone = ? AND status = ?", otp.Phone, "T").First(&user).Error; err != nil {
 		log.Warn("password_reset_failed", "phone", otp.Phone, "reason", "user_not_found")
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "user not found"})
 		return

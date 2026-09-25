@@ -19,7 +19,7 @@ type Procedure struct {
 	UUID    string `json:"uuid"`                          // Pet ID (as string)
 	Date    string `json:"date"`                          // Procedure date
 	Date2   string `json:"date2"`                         // Next due date
-	Date3   string `json:"date3"`                         // SMS reminder trigger date (= date2 - 1 month)
+	Date3   string `json:"date3"`                         // date2 in JS-month encoding for the PHP calendar; see handlers.legacyDate3
 	TP      int    `json:"tp"`                            // Procedure type code
 	TPName  string `gorm:"column:tpname" json:"tpname"`   // Procedure type display name
 	Vac     string `json:"vac"`                           // Vaccine/procedure name OR tp=11 drops-custom OR tp=12 custom drug
@@ -71,11 +71,12 @@ type Procedure struct {
 	// Denormalized identity / housekeeping columns the legacy table also
 	// stores. Mostly redundant with Pet but the PHP forms set them on
 	// every save and some queries depend on them.
-	Address string `json:"address"`
-	Company string `json:"company"`            // payment method label e.g. "ბარათი", "ნაღდი"
-	Sax     string `json:"sax"`                // pet sex denormalized
-	Pn      string `gorm:"column:pn" json:"pn"`// owner personal-id copy
-	Name    string `json:"name"`               // edit-log message column (NOT the pet name — that's PName)
+	Address    string `json:"address"`
+	Company    string `json:"company"`               // payment method label e.g. "ბარათი", "ნაღდი"
+	Sax        string `json:"sax"`                   // pet sex denormalized
+	PetSpecies string `gorm:"column:pet" json:"pet"` // pet species denormalized (ძაღლი / კატა / სხვა)
+	Pn         string `gorm:"column:pn" json:"pn"`   // owner personal-id copy
+	Name       string `json:"name"`                  // edit-log message column (NOT the pet name — that's PName)
 }
 
 func (Procedure) TableName() string { return "vaccination" }

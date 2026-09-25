@@ -1,6 +1,7 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,9 +42,19 @@ func (s *SMSService) Send(phone, message string) error {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("sms api error %d: %s", resp.StatusCode, string(body))
+	}
+	// SMSOffice reports a rejected message (bad number, no balance) with
+	// HTTP 200 and {"Success":false,...}; without this check those were
+	// counted as sent.
+	var out struct {
+		Success *bool
+		Message string
+	}
+	if json.Unmarshal(body, &out) == nil && out.Success != nil && !*out.Success {
+		return fmt.Errorf("sms api rejected: %s", out.Message)
 	}
 
 	return nil
