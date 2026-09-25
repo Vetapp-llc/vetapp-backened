@@ -304,3 +304,24 @@ func TestLegacyPhoneFormatsMatchOnRecovery(t *testing.T) {
 		}
 	}
 }
+
+// Codex re-review #1: a verified phone alone let anyone claim another
+// person's clinic-registered pets by typing their personal ID.
+func TestRegisterClaimingExistingPetsNeedsTheirPhone(t *testing.T) {
+	reset(t)
+	must(t, db.Create(&models.Pet{ID: 90010, UUID: "61001017777", Name: "ბობი", Pet: "ძაღლი", Phone: "577000001", Vet: clinicA}).Error)
+	reg := func(phone, email string) resp {
+		id, code := registerOTP(t, phone)
+		return call(t, 0, "POST", "/api/auth/register", map[string]interface{}{"first_name": "x", "last_name": "61001017777",
+			"email": email, "password": "pw", "phone": phone, "otp_id": id, "otp_code": code})
+	}
+	r := reg("577000002", "thief2@test.ge")
+	if r.Code != http.StatusConflict || errCode(t, r) != "identity_unverified" {
+		t.Fatalf("stranger's phone: %d %s", r.Code, r.Body)
+	}
+	expect(t, reg("+995 577 00 00 01", "real@test.ge"), http.StatusCreated)
+	// An ID with no pets needs no match.
+	id, code := registerOTP(t, "577000003")
+	expect(t, call(t, 0, "POST", "/api/auth/register", map[string]interface{}{"first_name": "x", "last_name": "61001016666",
+		"email": "new@test.ge", "password": "pw", "phone": "577000003", "otp_id": id, "otp_code": code}), http.StatusCreated)
+}

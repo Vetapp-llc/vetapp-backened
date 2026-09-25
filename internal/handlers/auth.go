@@ -391,6 +391,19 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "an account with this personal ID already exists", Code: codePersonalIDTaken})
 		return
 	}
+	// Clinics register pets under the owner's personal ID and record the
+	// owner's phone on them. Claiming an ID that already has pets needs a
+	// verified phone the clinic has on record for it; otherwise anyone
+	// could type someone else's ID and see their pets. (IDs whose pets
+	// carry no usable phone can't be checked and are let through.)
+	if !phoneOnRecordFor(tx, personalID, phone) {
+		log.Warn("register_failed", "email", email, "reason", "identity_unverified")
+		writeJSON(w, http.StatusConflict, ErrorResponse{
+			Error: "this phone number doesn't match the clinic's records for this personal ID",
+			Code:  codeIdentityUnverified,
+		})
+		return
+	}
 	if !consumeOTP(tx, otp.ID) {
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "code expired or already used", Code: codeOTPExpired})
 		return
@@ -1330,6 +1343,22 @@ func checkOTP(db *gorm.DB, otpID uint, code, typ, phone string) (models.OTP, int
 func consumeOTP(tx *gorm.DB, id uint) bool {
 	res := tx.Exec(`UPDATE otp_codes SET used = true WHERE id = ? AND used = false AND expires_at > ?`, id, time.Now())
 	return res.Error == nil && res.RowsAffected == 1
+}
+
+// phoneOnRecordFor reports whether phone may claim personalID: true when
+// no pet under the ID has a usable phone, or one of them is this phone.
+func phoneOnRecordFor(db *gorm.DB, personalID, phone string) bool {
+	var phones []string
+	db.Raw(`SELECT DISTINCT phone FROM pets WHERE TRIM(uuid) = ? AND TRIM(COALESCE(phone, '')) <> ''`, personalID).Scan(&phones)
+	usable := false
+	for _, p := range phones {
+		n := normalizePhone(p)
+		if n == phone {
+			return true
+		}
+		usable = usable || n != ""
+	}
+	return !usable
 }
 
 // emailTaken reports whether any account already uses this address.

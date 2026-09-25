@@ -30,4 +30,5 @@ const (
 	codeRateLimited        = "rate_limited"
 	codeUserNotFound       = "user_not_found"
 	codeWrongPassword      = "wrong_password"
+	codeIdentityUnverified = "identity_unverified"
 )
