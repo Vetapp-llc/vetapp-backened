@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"vetapp-backend/internal/middleware"
@@ -23,12 +24,12 @@ func NewPaymentHandler(db *gorm.DB) *PaymentHandler {
 
 // RecordPaymentRequest is the request body for recording a payment.
 type RecordPaymentRequest struct {
-	UUID         string   `json:"uuid" validate:"required"`          // Pet ID
-	Date         string   `json:"date" validate:"required"`          // Payment date
-	Method       string   `json:"method" validate:"required,oneof=card cash"` // card or cash
-	Amount       string   `json:"amount" validate:"required"`        // Amount in GEL
-	Owner        string   `json:"owner"`                             // Owner personal ID
-	ProcedureIDs []uint   `json:"procedure_ids"`                     // Procedure IDs to mark as paid
+	UUID         string `json:"uuid" validate:"required"`                   // Pet ID
+	Date         string `json:"date"`                                       // Payment date; defaults to today
+	Method       string `json:"method" validate:"required,oneof=card cash"` // card or cash
+	Amount       string `json:"amount" validate:"required"`                 // Amount in GEL
+	Owner        string `json:"owner"`                                      // Owner personal ID
+	ProcedureIDs []uint `json:"procedure_ids"`                              // Procedures to mark paid; empty = all of the pet's unpaid items that day
 }
 
 // PaymentResponse is the API response for a payment.
@@ -82,6 +83,21 @@ func (h *PaymentHandler) Record(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
+	if claims.Zip == "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "payments are taken by a clinic; this account has no clinic"})
+		return
+	}
+	if req.Date == "" {
+		req.Date = todayGeorgia()
+	}
+	if !isISODate(req.Date) {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "date must be YYYY-MM-DD"})
+		return
+	}
+	if !isMoney(req.Amount) {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "amount must be a number, e.g. 40 or 12.50"})
+		return
+	}
 
 	// The API speaks "card"/"cash"; the column stores the Georgian
 	// labels the legacy PHP frontend writes ("ბარათი" / "ნაღდი
@@ -96,20 +112,84 @@ func (h *PaymentHandler) Record(w http.ResponseWriter, r *http.Request) {
 		SK:     claims.Zip,
 	}
 
-	if err := h.db.Create(&payment).Error; err != nil {
+	// vet/paystatus.php: insert the payment, then mark the pet's unpaid
+	// items paid and stamp the method on them (`company`). One
+	// transaction, so a payment can never exist without its items marked
+	// or the other way round.
+	//
+	// Only unpaid items of this pet at this clinic can be marked. If a
+	// listed item is already paid (a double submit, or two desks paying
+	// the same visit) the whole payment is refused rather than charged
+	// twice.
+	var marked int64
+	var replayed bool
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		prior, err := claimIdempotency(tx, r, "payments", req)
+		if err != nil {
+			return err
+		}
+		if prior != 0 {
+			replayed = true
+			return tx.First(&payment, prior).Error
+		}
+		q := tx.Model(&models.Procedure{}).
+			Where("uuid = ? AND sk = ? AND phone = ?", req.UUID, claims.Zip, "0")
+		if len(req.ProcedureIDs) > 0 {
+			q = q.Where("id IN ?", req.ProcedureIDs)
+		} else {
+			q = q.Where("date = ?", req.Date)
+		}
+		res := q.Updates(map[string]interface{}{"phone": "1", "company": payment.Method})
+		if res.Error != nil {
+			return res.Error
+		}
+		marked = res.RowsAffected
+		// Nothing left to pay (a double submit of "pay today's items"), or
+		// a listed item already paid: refuse rather than record money
+		// against nothing.
+		if marked == 0 || (len(req.ProcedureIDs) > 0 && marked != int64(len(uniqueUints(req.ProcedureIDs)))) {
+			return errAlreadyPaid
+		}
+		if err := tx.Create(&payment).Error; err != nil {
+			return err
+		}
+		return recordIdempotency(tx, r, payment.ID)
+	})
+	if replayed && err == nil {
+		writeJSON(w, http.StatusCreated, paymentToResponse(payment))
+		return
+	}
+	if errors.Is(err, errIdempotencyMismatch) {
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error()})
+		return
+	}
+	if errors.Is(err, errAlreadyPaid) {
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "nothing to pay: these items are already paid or do not belong to this pet"})
+		return
+	}
+	if err != nil {
 		log.Error("payment_failed", "error", err, "amount", req.Amount, "method", req.Method, "pet_id", req.UUID)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to record payment"})
 		return
 	}
 
-	// Mark procedures as paid (phone="1" means paid in the vaccination table)
-	if len(req.ProcedureIDs) > 0 {
-		h.db.Model(&models.Procedure{}).Where("id IN ?", req.ProcedureIDs).Update("phone", "1")
-	}
-
-	log.Info("payment_recorded", "payment_id", payment.ID, "amount", req.Amount, "method", req.Method, "procedure_ids", req.ProcedureIDs, "pet_id", req.UUID)
+	log.Info("payment_recorded", "payment_id", payment.ID, "amount", req.Amount, "method", req.Method, "items_marked", marked, "pet_id", req.UUID)
 
 	writeJSON(w, http.StatusCreated, paymentToResponse(payment))
+}
+
+var errAlreadyPaid = errors.New("already paid")
+
+func uniqueUints(in []uint) []uint {
+	seen := make(map[uint]struct{}, len(in))
+	out := in[:0:0]
+	for _, v := range in {
+		if _, dup := seen[v]; !dup {
+			seen[v] = struct{}{}
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // Daily returns the daily payment summary.
@@ -123,17 +203,15 @@ func (h *PaymentHandler) Record(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {object} ErrorResponse
 // @Router /payments/daily [get]
 func (h *PaymentHandler) Daily(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.GetClaims(r)
-
 	date := r.URL.Query().Get("date")
 	if date == "" {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "date is required"})
 		return
 	}
 
-	clinic := r.URL.Query().Get("clinic")
-	if clinic == "" {
-		clinic = claims.Zip
+	clinic, ok := resolveClinic(w, r)
+	if !ok {
+		return
 	}
 
 	var summary DailySummary
@@ -178,12 +256,11 @@ func (h *PaymentHandler) Daily(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {object} ErrorResponse
 // @Router /payments/history [get]
 func (h *PaymentHandler) History(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.GetClaims(r)
 	query := h.db.Model(&models.Payment{})
 
-	clinic := r.URL.Query().Get("clinic")
-	if clinic == "" {
-		clinic = claims.Zip
+	clinic, ok := resolveClinic(w, r)
+	if !ok {
+		return
 	}
 	// Raw column name: these Where clauses are SQL strings, so they must
 	// use the real column (`zip`), not the Go field name.

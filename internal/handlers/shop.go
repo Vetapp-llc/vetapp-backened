@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
+	"strings"
 
 	"vetapp-backend/internal/middleware"
 	"vetapp-backend/internal/models"
@@ -74,16 +74,12 @@ func shopToResponse(s models.Shop) ShopResponse {
 // @Failure 500 {object} ErrorResponse
 // @Router /shop [get]
 func (h *ShopHandler) List(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.GetClaims(r)
-	query := h.db.Model(&models.Shop{})
-
-	clinic := r.URL.Query().Get("clinic")
-	if clinic == "" {
-		clinic = claims.Zip
+	clinic, ok := resolveClinic(w, r)
+	if !ok {
+		return
 	}
 	// Raw column name — the shop table's clinic column is `zip`.
-	query = query.Where("zip = ?", clinic)
-
+	query := h.db.Model(&models.Shop{}).Where("zip = ?", clinic)
 	if dateFrom := r.URL.Query().Get("date_from"); dateFrom != "" {
 		query = query.Where("date >= ?", dateFrom)
 	}
@@ -91,14 +87,23 @@ func (h *ShopHandler) List(w http.ResponseWriter, r *http.Request) {
 		query = query.Where("date <= ?", dateTo)
 	}
 
+	// Card / cash / grand totals for the whole filtered range — the
+	// footer of vet/shop.php. Computed over every matching row, not just
+	// the page being returned.
+	var totals SalesTotals
+	query.Session(&gorm.Session{}).Select(
+		`COALESCE(SUM(CASE WHEN pay = ? AND `+numericGuard("price")+` THEN price::numeric ELSE 0 END), 0)::text AS card,
+		 COALESCE(SUM(CASE WHEN pay = ? AND `+numericGuard("price")+` THEN price::numeric ELSE 0 END), 0)::text AS cash,
+		 COALESCE(SUM(CASE WHEN `+numericGuard("price")+` THEN price::numeric ELSE 0 END), 0)::text AS total,
+		 COUNT(*) AS count`,
+		models.PayMethodCard, models.PayMethodCash,
+	).Scan(&totals)
+
 	// Paginated: 9,260 rows for the busiest clinic without a bound.
 	page := ParsePageParams(r)
 
-	var total int64
-	query.Count(&total)
-
 	var sales []models.Shop
-	if err := page.Paginate(query).Order("date DESC, id DESC").Find(&sales).Error; err != nil {
+	if err := page.Paginate(query.Session(&gorm.Session{})).Order("date DESC, id DESC").Find(&sales).Error; err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to fetch sales"})
 		return
 	}
@@ -108,7 +113,24 @@ func (h *ShopHandler) List(w http.ResponseWriter, r *http.Request) {
 		items[i] = shopToResponse(s)
 	}
 
-	writeJSON(w, http.StatusOK, NewPaginatedResponse(items, total, page))
+	writeJSON(w, http.StatusOK, ShopListResponse{
+		PaginatedResponse: NewPaginatedResponse(items, totals.Count, page),
+		Totals:            totals,
+	})
+}
+
+// SalesTotals sums a range of sales by payment method.
+type SalesTotals struct {
+	Card  string `json:"card" validate:"required"`
+	Cash  string `json:"cash" validate:"required"`
+	Total string `json:"total" validate:"required"`
+	Count int64  `json:"-"`
+}
+
+// ShopListResponse is a page of sales plus totals for the whole range.
+type ShopListResponse struct {
+	PaginatedResponse
+	Totals SalesTotals `json:"totals" validate:"required"`
 }
 
 // Create adds a new sale.
@@ -128,6 +150,15 @@ func (h *ShopHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateShopRequest
 	if err := decodeAndValidate(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	if msg := validateSale(req.Name, req.Price, req.Date); msg != "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: msg})
+		return
+	}
+	if claims.Zip == "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "sales are recorded by a clinic; this account has no clinic"})
 		return
 	}
 
@@ -165,30 +196,65 @@ func (h *ShopHandler) Create(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {object} ErrorResponse
 // @Router /shop/{id} [put]
 func (h *ShopHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-
 	var sale models.Shop
-	if err := h.db.First(&sale, id).Error; err != nil {
+	if err := ownedByCaller(h.db, r, "zip").Where("id = ?", chi.URLParam(r, "id")).First(&sale).Error; err != nil {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "sale not found"})
 		return
 	}
 
-	var updates map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid request body"})
+	var req UpdateShopRequest
+	if err := decodeAndValidate(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+	if req.Name != nil {
+		sale.Name = *req.Name
+	}
+	if req.Price != nil {
+		sale.Price = *req.Price
+	}
+	if req.Date != nil {
+		sale.Date = *req.Date
+	}
+	if req.Method != nil {
+		sale.Method = models.NormalizePayMethod(*req.Method)
+	}
+	if req.Comment != nil {
+		sale.Comment = *req.Comment
+	}
+	if msg := validateSale(sale.Name, sale.Price, sale.Date); msg != "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: msg})
 		return
 	}
 
-	delete(updates, "id")
-	delete(updates, "sk")
-
-	if err := h.db.Model(&sale).Updates(updates).Error; err != nil {
+	if err := h.db.Model(&sale).Select("name", "price", "date", "pay", "coment").Updates(&sale).Error; err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to update sale"})
 		return
 	}
-
-	h.db.First(&sale, id)
 	writeJSON(w, http.StatusOK, shopToResponse(sale))
+}
+
+// UpdateShopRequest is a partial update of a sale; omitted fields keep
+// their value. The clinic is never editable.
+type UpdateShopRequest struct {
+	Name    *string `json:"name"`
+	Price   *string `json:"price"`
+	Date    *string `json:"date"`
+	Method  *string `json:"method" validate:"omitempty,oneof=card cash"`
+	Comment *string `json:"comment"`
+}
+
+// validateSale returns a user-facing error, or "" when the sale is valid.
+func validateSale(name, price, date string) string {
+	switch {
+	case strings.TrimSpace(name) == "":
+		return "name is required"
+	case !isMoney(price):
+		return "price must be a number, e.g. 12.50"
+	case !isISODate(date):
+		return "date must be YYYY-MM-DD"
+	}
+	return ""
 }
 
 // Delete removes a sale.
@@ -205,7 +271,7 @@ func (h *ShopHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var sale models.Shop
-	if err := h.db.First(&sale, id).Error; err != nil {
+	if err := ownedByCaller(h.db, r, "zip").Where("id = ?", id).First(&sale).Error; err != nil {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "sale not found"})
 		return
 	}

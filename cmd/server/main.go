@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"vetapp-backend/internal/config"
 	"vetapp-backend/internal/database"
 	"vetapp-backend/internal/database/migrations"
+	"vetapp-backend/internal/handlers"
 	"vetapp-backend/internal/router"
 	"vetapp-backend/internal/services"
 )
@@ -62,6 +64,9 @@ func main() {
 	storageService := services.NewStorageService(cfg)
 
 	// Setup router with all routes
+	// Daily SMS reminders — only when SMS_DAILY_AT is set (see handlers).
+	handlers.StartSMSScheduler(context.Background(), db, smsService, os.Getenv("SMS_DAILY_AT"))
+
 	r := router.Setup(db, authService, smsService, emailService, ipayService, bogService, storageService, cfg.PaymentProvider, cfg.BaseURL, cfg.EmailVerifyBaseURL)
 
 	// Start server

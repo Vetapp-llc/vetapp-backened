@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
+	"strings"
 
 	"vetapp-backend/internal/middleware"
 	"vetapp-backend/internal/models"
@@ -52,11 +52,9 @@ func priceToResponse(p models.Price) PriceResponse {
 // @Failure 500 {object} ErrorResponse
 // @Router /prices [get]
 func (h *PriceHandler) List(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.GetClaims(r)
-
-	clinic := r.URL.Query().Get("clinic")
-	if clinic == "" {
-		clinic = claims.Zip
+	clinic, ok := resolveClinic(w, r)
+	if !ok {
+		return
 	}
 
 	var prices []models.Price
@@ -93,6 +91,15 @@ func (h *PriceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if msg := validatePrice(req.Name, req.Price); msg != "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: msg})
+		return
+	}
+	if claims.Zip == "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "this account has no clinic"})
+		return
+	}
+
 	price := models.Price{
 		Name:  req.Name,
 		Price: req.Price,
@@ -121,30 +128,53 @@ func (h *PriceHandler) Create(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {object} ErrorResponse
 // @Router /prices/{id} [put]
 func (h *PriceHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-
 	var price models.Price
-	if err := h.db.First(&price, id).Error; err != nil {
+	if err := ownedByCaller(h.db, r, "zip").Where("id = ?", chi.URLParam(r, "id")).First(&price).Error; err != nil {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "price not found"})
 		return
 	}
 
-	var updates map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid request body"})
+	var req UpdatePriceRequest
+	if err := decodeAndValidate(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+	if req.Name != nil {
+		price.Name = *req.Name
+	}
+	if req.Price != nil {
+		price.Price = *req.Price
+	}
+	if msg := validatePrice(price.Name, price.Price); msg != "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: msg})
 		return
 	}
 
-	delete(updates, "id")
-	delete(updates, "sk")
-
-	if err := h.db.Model(&price).Updates(updates).Error; err != nil {
+	if err := h.db.Model(&price).Select("name", "price").Updates(&price).Error; err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to update price"})
 		return
 	}
-
-	h.db.First(&price, id)
 	writeJSON(w, http.StatusOK, priceToResponse(price))
+}
+
+// UpdatePriceRequest is a partial update; omitted fields keep their value.
+type UpdatePriceRequest struct {
+	Name  *string `json:"name"`
+	Price *string `json:"price"`
+}
+
+// validatePrice checks a price-list entry. The price is free text on
+// purpose: clinics list ranges such as "15/125" and "130+".
+func validatePrice(name, price string) string {
+	switch {
+	case strings.TrimSpace(name) == "":
+		return "name is required"
+	case strings.TrimSpace(price) == "":
+		return "price is required"
+	case len(name) > 500 || len(price) > 100:
+		return "name or price is too long"
+	}
+	return ""
 }
 
 // Delete removes a price entry.
@@ -161,7 +191,7 @@ func (h *PriceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var price models.Price
-	if err := h.db.First(&price, id).Error; err != nil {
+	if err := ownedByCaller(h.db, r, "zip").Where("id = ?", id).First(&price).Error; err != nil {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "price not found"})
 		return
 	}

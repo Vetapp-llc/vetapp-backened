@@ -3,33 +3,13 @@ package handlers
 import (
 	"net/http"
 	"sync"
+	"time"
 
-	"vetapp-backend/internal/middleware"
 	"vetapp-backend/internal/models"
 
 	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 )
-
-// resolveClinic returns the clinic the request should be scoped to,
-// honouring the admin-only `?clinic=...` override. Centralised because
-// the same 10-line block was repeated in every stats handler — easy to
-// drift out of sync (e.g. forgetting the admin role check).
-//
-// Returns the clinic and (false, w-already-written) if the override was
-// rejected. Callers should bail when ok=false.
-func resolveClinic(w http.ResponseWriter, r *http.Request) (clinic string, ok bool) {
-	claims := middleware.GetClaims(r)
-	clinic = claims.Zip
-	if override := r.URL.Query().Get("clinic"); override != "" {
-		if claims.GroupID != models.RoleAdmin {
-			writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "admin only"})
-			return "", false
-		}
-		clinic = override
-	}
-	return clinic, true
-}
 
 // StatsHandler handles clinic statistics endpoints.
 type StatsHandler struct {
@@ -218,8 +198,8 @@ func (h *StatsHandler) DailyClinic(w http.ResponseWriter, r *http.Request) {
 	}
 
 	date := r.URL.Query().Get("date")
-	if date == "" {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "date is required"})
+	if !isISODate(date) {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "date is required (YYYY-MM-DD)"})
 		return
 	}
 
@@ -241,7 +221,7 @@ func (h *StatsHandler) DailyClinic(w http.ResponseWriter, r *http.Request) {
 		defer wg.Done()
 		h.db.Raw(
 			`SELECT tp, TRIM(tpname) AS tp_name, COUNT(*)::int AS count,
-			        COALESCE(SUM(NULLIF(price,'')::numeric)::text, '0') AS total
+			        COALESCE(SUM(CASE WHEN price ~ '^[0-9]+(\.[0-9]+){0,1}$' THEN price::numeric END)::text, '0') AS total
 			 FROM vaccination WHERE sk = ? AND date = ?
 			 GROUP BY tp, TRIM(tpname) ORDER BY count DESC`, zip, date,
 		).Scan(&procs)
@@ -288,7 +268,7 @@ func (h *StatsHandler) DailyClinic(w http.ResponseWriter, r *http.Request) {
 	// If paymethod total is empty/0, compute from procedure prices
 	if result.Total == "" || result.Total == "0" {
 		var procTotal string
-		h.db.Raw(`SELECT COALESCE(SUM(NULLIF(price,'')::numeric)::text, '0') FROM vaccination WHERE sk = ? AND date = ?`, zip, date).Scan(&procTotal)
+		h.db.Raw(`SELECT COALESCE(SUM(CASE WHEN price ~ '^[0-9]+(\.[0-9]+){0,1}$' THEN price::numeric END)::text, '0') FROM vaccination WHERE sk = ? AND date = ?`, zip, date).Scan(&procTotal)
 		if procTotal != "" {
 			result.Total = procTotal
 		} else {
@@ -303,10 +283,10 @@ func (h *StatsHandler) DailyClinic(w http.ResponseWriter, r *http.Request) {
 
 // MonthlyClinicStats is the monthly revenue/procedure breakdown for a clinic.
 type MonthlyClinicStats struct {
-	Month      string                 `json:"month"`
-	Total      string                 `json:"total"`
-	Procedures []ProcedureTypeRevenue `json:"procedures"`
-	DailyBreakdown []DailyTotal       `json:"dailyBreakdown"`
+	Month          string                 `json:"month"`
+	Total          string                 `json:"total"`
+	Procedures     []ProcedureTypeRevenue `json:"procedures"`
+	DailyBreakdown []DailyTotal           `json:"dailyBreakdown"`
 }
 
 // DailyTotal is a single day's total revenue.
@@ -334,7 +314,7 @@ func (h *StatsHandler) MonthlyClinic(w http.ResponseWriter, r *http.Request) {
 	}
 
 	month := r.URL.Query().Get("month")
-	if month == "" {
+	if _, err := time.Parse("2006-01", month); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "month is required (YYYY-MM)"})
 		return
 	}
@@ -352,18 +332,18 @@ func (h *StatsHandler) MonthlyClinic(w http.ResponseWriter, r *http.Request) {
 		defer wg.Done()
 		h.db.Raw(
 			`SELECT tp, TRIM(tpname) AS tp_name, COUNT(*)::int AS count,
-			        COALESCE(SUM(NULLIF(price,'')::numeric)::text, '0') AS total
-			 FROM vaccination WHERE sk = ? AND LEFT(date, 7) = ?
-			 GROUP BY tp, TRIM(tpname) ORDER BY count DESC`, zip, month,
+			        COALESCE(SUM(CASE WHEN price ~ '^[0-9]+(\.[0-9]+){0,1}$' THEN price::numeric END)::text, '0') AS total
+			 FROM vaccination WHERE sk = ? AND date BETWEEN ? || '-01' AND ? || '-31'
+			 GROUP BY tp, TRIM(tpname) ORDER BY count DESC`, zip, month, month,
 		).Scan(&procs)
 	}()
 
 	go func() {
 		defer wg.Done()
 		h.db.Raw(
-			`SELECT date, COALESCE(SUM(NULLIF(price,'')::numeric)::text, '0') AS total, COUNT(*)::int AS count
-			 FROM vaccination WHERE sk = ? AND LEFT(date, 7) = ?
-			 GROUP BY date ORDER BY date DESC`, zip, month,
+			`SELECT date, COALESCE(SUM(CASE WHEN price ~ '^[0-9]+(\.[0-9]+){0,1}$' THEN price::numeric END)::text, '0') AS total, COUNT(*)::int AS count
+			 FROM vaccination WHERE sk = ? AND date BETWEEN ? || '-01' AND ? || '-31'
+			 GROUP BY date ORDER BY date DESC`, zip, month, month,
 		).Scan(&daily)
 	}()
 
@@ -378,7 +358,7 @@ func (h *StatsHandler) MonthlyClinic(w http.ResponseWriter, r *http.Request) {
 
 	// Compute total from procedures
 	var totalStr string
-	h.db.Raw(`SELECT COALESCE(SUM(NULLIF(price,'')::numeric)::text, '0') FROM vaccination WHERE sk = ? AND LEFT(date, 7) = ?`, zip, month).Scan(&totalStr)
+	h.db.Raw(`SELECT COALESCE(SUM(CASE WHEN price ~ '^[0-9]+(\.[0-9]+){0,1}$' THEN price::numeric END)::text, '0') FROM vaccination WHERE sk = ? AND date BETWEEN ? || '-01' AND ? || '-31'`, zip, month, month).Scan(&totalStr)
 	if totalStr == "" {
 		totalStr = "0"
 	}
@@ -394,10 +374,10 @@ func (h *StatsHandler) MonthlyClinic(w http.ResponseWriter, r *http.Request) {
 
 // YearlyClinicStats is the yearly revenue/procedure breakdown for a clinic.
 type YearlyClinicStats struct {
-	Year            string                 `json:"year"`
-	Total           string                 `json:"total"`
-	Procedures      []ProcedureTypeRevenue `json:"procedures"`
-	MonthlyBreakdown []MonthlyTotal        `json:"monthlyBreakdown"`
+	Year             string                 `json:"year"`
+	Total            string                 `json:"total"`
+	Procedures       []ProcedureTypeRevenue `json:"procedures"`
+	MonthlyBreakdown []MonthlyTotal         `json:"monthlyBreakdown"`
 }
 
 // MonthlyTotal is a single month's total revenue.
@@ -425,7 +405,7 @@ func (h *StatsHandler) YearlyClinic(w http.ResponseWriter, r *http.Request) {
 	}
 
 	year := r.URL.Query().Get("year")
-	if year == "" {
+	if _, err := time.Parse("2006", year); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "year is required (YYYY)"})
 		return
 	}
@@ -443,18 +423,18 @@ func (h *StatsHandler) YearlyClinic(w http.ResponseWriter, r *http.Request) {
 		defer wg.Done()
 		h.db.Raw(
 			`SELECT tp, TRIM(tpname) AS tp_name, COUNT(*)::int AS count,
-			        COALESCE(SUM(NULLIF(price,'')::numeric)::text, '0') AS total
-			 FROM vaccination WHERE sk = ? AND LEFT(date, 4) = ?
-			 GROUP BY tp, TRIM(tpname) ORDER BY count DESC`, zip, year,
+			        COALESCE(SUM(CASE WHEN price ~ '^[0-9]+(\.[0-9]+){0,1}$' THEN price::numeric END)::text, '0') AS total
+			 FROM vaccination WHERE sk = ? AND date BETWEEN ? || '-01-01' AND ? || '-12-31'
+			 GROUP BY tp, TRIM(tpname) ORDER BY count DESC`, zip, year, year,
 		).Scan(&procs)
 	}()
 
 	go func() {
 		defer wg.Done()
 		h.db.Raw(
-			`SELECT LEFT(date, 7) AS month, COALESCE(SUM(NULLIF(price,'')::numeric)::text, '0') AS total, COUNT(*)::int AS count
-			 FROM vaccination WHERE sk = ? AND LEFT(date, 4) = ?
-			 GROUP BY LEFT(date, 7) ORDER BY month DESC`, zip, year,
+			`SELECT LEFT(date, 7) AS month, COALESCE(SUM(CASE WHEN price ~ '^[0-9]+(\.[0-9]+){0,1}$' THEN price::numeric END)::text, '0') AS total, COUNT(*)::int AS count
+			 FROM vaccination WHERE sk = ? AND date BETWEEN ? || '-01-01' AND ? || '-12-31'
+			 GROUP BY LEFT(date, 7) ORDER BY month DESC`, zip, year, year,
 		).Scan(&monthly)
 	}()
 
@@ -468,7 +448,7 @@ func (h *StatsHandler) YearlyClinic(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var totalStr string
-	h.db.Raw(`SELECT COALESCE(SUM(NULLIF(price,'')::numeric)::text, '0') FROM vaccination WHERE sk = ? AND LEFT(date, 4) = ?`, zip, year).Scan(&totalStr)
+	h.db.Raw(`SELECT COALESCE(SUM(CASE WHEN price ~ '^[0-9]+(\.[0-9]+){0,1}$' THEN price::numeric END)::text, '0') FROM vaccination WHERE sk = ? AND date BETWEEN ? || '-01-01' AND ? || '-12-31'`, zip, year, year).Scan(&totalStr)
 	if totalStr == "" {
 		totalStr = "0"
 	}

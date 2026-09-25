@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"vetapp-backend/internal/middleware"
 	"vetapp-backend/internal/models"
@@ -24,17 +25,28 @@ func NewAllergyHandler(db *gorm.DB) *AllergyHandler {
 
 // CreateAllergyRequest is the request body for adding an allergy.
 type CreateAllergyRequest struct {
-	UUID string `json:"uuid" validate:"required"` // Pet ID
-	Name string `json:"name" validate:"required"` // Allergy name
-	Date string `json:"date"`                     // Date recorded
+	UUID    string `json:"uuid" validate:"required"` // Pet ID
+	Name    string `json:"name" validate:"required"` // Allergy name
+	Comment string `json:"comment"`                  // Free-text note
+	Date    string `json:"date"`                     // Date recorded; defaults to today
 }
 
 // AllergyResponse is the API response for an allergy record.
 type AllergyResponse struct {
-	ID   uint   `json:"id" validate:"required"`
-	UUID string `json:"uuid" validate:"required"`
-	Name string `json:"name" validate:"required"`
-	Date string `json:"date" validate:"required"`
+	ID      uint   `json:"id" validate:"required"`
+	UUID    string `json:"uuid" validate:"required"`
+	Name    string `json:"name" validate:"required"`
+	Comment string `json:"comment" validate:"required"`
+	Date    string `json:"date" validate:"required"`
+	// Mine is true when the caller's clinic recorded it (and may delete it).
+	Mine bool `json:"mine" validate:"required"`
+}
+
+func allergyToResponse(a models.Allergy, clinic string) AllergyResponse {
+	return AllergyResponse{
+		ID: a.ID, UUID: a.UUID, Name: cleanText(a.Name), Comment: cleanText(a.Comment),
+		Date: a.Date, Mine: clinic != "" && a.SK == clinic,
+	}
 }
 
 // --- Handlers ---
@@ -56,15 +68,23 @@ func (h *AllergyHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Allergies are safety information, so a clinic that may open the pet
+	// sees every clinic's entries (and the owner's), as vet/veals.php did.
+	if !canAccessPet(h.db, r, petID) {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
+		return
+	}
+
 	var allergies []models.Allergy
-	if err := h.db.Where("uuid = ?", petID).Order("id DESC").Find(&allergies).Error; err != nil {
+	if err := h.db.Where("uuid = ?", petID).Order("date DESC, id DESC").Find(&allergies).Error; err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to fetch allergies"})
 		return
 	}
 
+	zip := middleware.GetClaims(r).Zip
 	items := make([]AllergyResponse, len(allergies))
 	for i, a := range allergies {
-		items[i] = AllergyResponse{ID: a.ID, UUID: a.UUID, Name: a.Name, Date: a.Date}
+		items[i] = allergyToResponse(a, zip)
 	}
 
 	writeJSON(w, http.StatusOK, items)
@@ -90,11 +110,32 @@ func (h *AllergyHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.TrimSpace(req.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "name is required"})
+		return
+	}
+	if req.Date == "" {
+		req.Date = todayGeorgia()
+	}
+	if !isISODate(req.Date) {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "date must be YYYY-MM-DD"})
+		return
+	}
+	if claims.Zip == "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "this account has no clinic"})
+		return
+	}
+	if !canAccessPet(h.db, r, req.UUID) {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
+		return
+	}
+
 	allergy := models.Allergy{
-		UUID: req.UUID,
-		Name: req.Name,
-		Date: req.Date,
-		SK:   claims.Zip,
+		UUID:    req.UUID,
+		Name:    strings.TrimSpace(req.Name),
+		Comment: req.Comment,
+		Date:    req.Date,
+		SK:      claims.Zip,
 	}
 
 	if err := h.db.Create(&allergy).Error; err != nil {
@@ -102,9 +143,7 @@ func (h *AllergyHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, AllergyResponse{
-		ID: allergy.ID, UUID: allergy.UUID, Name: allergy.Name, Date: allergy.Date,
-	})
+	writeJSON(w, http.StatusCreated, allergyToResponse(allergy, claims.Zip))
 }
 
 // Delete removes an allergy record.
@@ -120,8 +159,9 @@ func (h *AllergyHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *AllergyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
+	// Only the clinic that recorded an entry may remove it.
 	var allergy models.Allergy
-	if err := h.db.First(&allergy, id).Error; err != nil {
+	if err := ownedByCaller(h.db, r, "sk").Where("id = ?", id).First(&allergy).Error; err != nil {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "allergy not found"})
 		return
 	}

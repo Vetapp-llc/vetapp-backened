@@ -8,10 +8,10 @@ import (
 // generateVerificationToken is the source of the entropy for our
 // email-verification links. Two properties matter:
 //
-//   1. URL safety — base64url encoding, no padding, no chars that need
-//      escaping in a query string.
-//   2. Sufficient entropy — 32 raw bytes → 43 chars; collisions over a
-//      24h TTL are astronomically unlikely.
+//  1. URL safety — base64url encoding, no padding, no chars that need
+//     escaping in a query string.
+//  2. Sufficient entropy — 32 raw bytes → 43 chars; collisions over a
+//     24h TTL are astronomically unlikely.
 //
 // Tests below pin both invariants so a future refactor can't silently
 // shorten the token or introduce unsafe characters.

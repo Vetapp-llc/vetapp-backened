@@ -44,6 +44,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -104,10 +106,12 @@ var updateExisting bool
 
 func main() {
 	var (
-		fullSync  = flag.Bool("full", false, "TRUNCATE Supabase + full re-copy from MySQL (default: incremental)")
-		dr        = flag.Bool("dry-run", false, "Read-only mode — report per-table counts, do not write")
-		assumeYes = flag.Bool("yes", false, "Skip the interactive confirmation prompt for --full")
-		update    = flag.Bool("update", false, "Also refresh rows that already exist in Supabase but were EDITED in MySQL (upsert). Without this, only brand-new ids are copied and upstream edits are silently lost.")
+		fullSync   = flag.Bool("full", false, "TRUNCATE Supabase + full re-copy from MySQL (default: incremental)")
+		dr         = flag.Bool("dry-run", false, "Read-only mode — report per-table counts, do not write")
+		assumeYes  = flag.Bool("yes", false, "Skip the interactive confirmation prompt for --full")
+		relocate   = flag.Bool("relocate-app-rows", false, "Move rows the app created before migration 016 (ids above MySQL's highest, below 1,000,000,000) into the app id range, fixing references")
+		discardApp = flag.Bool("discard-app-data", false, "With --full: allow erasing rows created, edited or deleted in the new app")
+		update     = flag.Bool("update", false, "Also refresh rows that already exist in Supabase but were EDITED in MySQL (upsert). Without this, only brand-new ids are copied and upstream edits are silently lost.")
 	)
 	flag.Parse()
 	dryRun = *dr
@@ -165,6 +169,8 @@ func main() {
 	// MySQL, etc.) BEFORE any destructive op.
 	preflight := buildPreflight(my, pg, tables)
 	printPreflight(preflight, *fullSync)
+	loadProtected(pg)
+	earlyRows := handleEarlyAppRows(my, pg, *relocate)
 
 	if *fullSync && !dryRun {
 		if !*assumeYes {
@@ -174,7 +180,7 @@ func main() {
 			}
 		}
 		log.Println("\n=== Truncating Supabase tables ===")
-		truncateAll(pg, tables)
+		guardedTruncate(pg, tables, earlyRows, *discardApp)
 		for _, t := range []string{"memberlogin_sms_codes"} {
 			if dryRun {
 				log.Printf("  [dry-run] would TRUNCATE %s", t)
@@ -202,6 +208,15 @@ func main() {
 			continue
 		}
 		syncTable(my, pg, table, *fullSync)
+	}
+	for _, table := range tables {
+		reapplyAppDeletes(pg, table)
+	}
+	if len(keptRows) > 0 {
+		log.Println("\n=== Kept the new app's version (edited or deleted there) ===")
+		for t, n := range keptRows {
+			log.Printf("  %-40s %d row(s)", t, n)
+		}
 	}
 
 	// Repair identity sequences. Rows are inserted with their original
@@ -569,10 +584,152 @@ func syncTable(my, pg *sql.DB, table string, fullSync bool) {
 	log.Printf("  synced %d/%d", inserted, totalRows)
 }
 
+// --- Protecting new-app writes (see migration 016) ---
+//
+// While PHP and the new app both run, a row can be changed on either
+// side. The app's changes are recorded in `app_changes` by a trigger;
+// for those rows the app's version wins: the sync neither overwrites an
+// edited row nor re-inserts a deleted one. Rows the app created carry ids
+// from 1,000,000,000 up, which MySQL never reaches.
+
+// protected[table] holds the ids the app has edited or deleted.
+var protected = map[string]map[int64]bool{}
+
+// keptRows counts, per table, MySQL rows skipped because the app owns them.
+var keptRows = map[string]int{}
+
+// haveAppChanges is true once app_changes is known to exist (migration
+// 016); without it the sync behaves as before and protects nothing.
+var haveAppChanges bool
+
+// loadProtected reads app_changes once. A database without the table
+// (migration 016 not yet applied) protects nothing and says so.
+func loadProtected(pg *sql.DB) {
+	// Only a database that has never run migration 016 may sync without
+	// protection. Any other failure aborts: syncing with protection
+	// silently off would overwrite the app's work.
+	var exists bool
+	if err := pg.QueryRow(`SELECT to_regclass('public.app_changes') IS NOT NULL`).Scan(&exists); err != nil {
+		log.Fatalf("cannot check for app_changes: %v", err)
+	}
+	if !exists {
+		log.Printf("  NOTE app_changes does not exist — run the backend once to apply migrations 016/017. New-app edits are NOT protected in this run.")
+		return
+	}
+	rows, err := pg.Query(`SELECT table_name, row_id FROM app_changes`)
+	if err != nil {
+		log.Fatalf("cannot read app_changes: %v", err)
+	}
+	defer rows.Close()
+	haveAppChanges = true
+	n := 0
+	for rows.Next() {
+		var t string
+		var id int64
+		if rows.Scan(&t, &id) == nil {
+			if protected[t] == nil {
+				protected[t] = map[int64]bool{}
+			}
+			protected[t][id] = true
+			n++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Fatalf("cannot read app_changes: %v", err)
+	}
+	log.Printf("  %d row(s) edited or deleted in the new app will be kept as they are", n)
+}
+
+// idIndex is the position of the `id` column, or -1.
+func idIndex(cols []string) int {
+	for i, c := range cols {
+		if strings.EqualFold(c, "id") {
+			return i
+		}
+	}
+	return -1
+}
+
+func asInt64(v interface{}) (int64, bool) {
+	switch x := v.(type) {
+	case int64:
+		return x, true
+	case int:
+		return int64(x), true
+	case []byte:
+		n, err := strconv.ParseInt(string(x), 10, 64)
+		return n, err == nil
+	case string:
+		n, err := strconv.ParseInt(x, 10, 64)
+		return n, err == nil
+	}
+	return 0, false
+}
+
+// dropProtected removes rows the app owns from a batch.
+func dropProtected(table string, cols []string, batch [][]interface{}) [][]interface{} {
+	prot := protected[table]
+	idx := idIndex(cols)
+	if len(prot) == 0 || idx < 0 {
+		return batch
+	}
+	out := batch[:0]
+	for _, row := range batch {
+		if id, ok := asInt64(row[idx]); ok && prot[id] {
+			keptRows[table]++
+			continue
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// execAsSync runs one write in a transaction marked as the sync's own
+// (the change-log trigger ignores it). It first takes the table's sync
+// lock exclusively — see migration 017: that waits out every in-flight
+// app transaction on the table, so the write's snapshot includes their
+// app_changes entries and the protection guard cannot miss them.
+func execAsSync(pg *sql.DB, table, query string, args ...interface{}) error {
+	tx, err := pg.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`SET LOCAL vetapp.sync = 'on'`); err != nil {
+		return err
+	}
+	if haveAppChanges {
+		if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('vetapp-sync|' || $1))`, table); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(query, args...); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// reapplyAppDeletes deletes again any row the app deleted — covering a
+// row re-inserted by a sync that read MySQL just before the app's delete.
+func reapplyAppDeletes(pg *sql.DB, table string) {
+	if dryRun || !haveAppChanges {
+		return
+	}
+	var n int
+	if err := pg.QueryRow(`SELECT COUNT(*) FROM app_changes WHERE table_name = $1 AND op = 'delete'`, table).Scan(&n); err != nil || n == 0 {
+		return
+	}
+	q := fmt.Sprintf(`DELETE FROM %q WHERE id IN (SELECT row_id FROM app_changes WHERE table_name = $1 AND op = 'delete')`, table)
+	if err := execAsSync(pg, table, q, table); err != nil {
+		log.Printf("  WARN re-applying app deletes on %s: %v", table, err)
+	}
+}
+
 // insertBatch inserts multiple rows in a single INSERT statement.
 // In dry-run mode it counts the rows it *would* insert and returns,
 // so the per-table progress numbers stay informative.
 func insertBatch(pg *sql.DB, table string, cols []string, batch [][]interface{}) (int, int) {
+	batch = dropProtected(table, cols, batch)
 	if len(batch) == 0 {
 		return 0, 0
 	}
@@ -602,7 +759,7 @@ func insertBatch(pg *sql.DB, table string, cols []string, batch [][]interface{})
 		table, pgQuoteCols(cols), strings.Join(valueClauses, ", "), suffix,
 	)
 
-	_, err := pg.Exec(query, allVals...)
+	err := execAsSync(pg, table, query, allVals...)
 	if err != nil {
 		// If batch fails, fall back to row-by-row so one bad row can't
 		// discard the whole batch. Errors are reported per row.
@@ -613,7 +770,7 @@ func insertBatch(pg *sql.DB, table string, cols []string, batch [][]interface{})
 			table, pgQuoteCols(cols), pgPlaceholders(nCols), suffix,
 		)
 		for _, row := range batch {
-			if _, err := pg.Exec(single, row...); err != nil {
+			if err := execAsSync(pg, table, single, row...); err != nil {
 				bad++
 				// Log the first few so failures aren't silent. The old
 				// behaviour incremented a counter and swallowed the
@@ -670,6 +827,11 @@ func conflictClause(pg *sql.DB, table string, cols []string) string {
 		if inPK[strings.ToLower(c)] {
 			continue // never rewrite the key we matched on
 		}
+		if table == "memberlogin_members" && strings.EqualFold(c, "last_login") {
+			// Either system may record a sign-in; keep the later one.
+			sets = append(sets, fmt.Sprintf(`%q = GREATEST(EXCLUDED.%q, %q.%q)`, c, c, table, c))
+			continue
+		}
 		sets = append(sets, fmt.Sprintf("%q = EXCLUDED.%q", c, c))
 	}
 
@@ -683,7 +845,13 @@ func conflictClause(pg *sql.DB, table string, cols []string) string {
 		// Key-only table: nothing to update, but still don't error.
 		return conflict + " DO NOTHING"
 	}
-	return conflict + " DO UPDATE SET " + strings.Join(sets, ", ")
+	upd := conflict + " DO UPDATE SET " + strings.Join(sets, ", ")
+	// An app edit landing while the sync runs (after loadProtected) is
+	// still honoured: the upsert skips any row now in app_changes.
+	if haveAppChanges && len(pk) == 1 && strings.EqualFold(pk[0], "id") {
+		upd += fmt.Sprintf(` WHERE NOT EXISTS (SELECT 1 FROM app_changes c WHERE c.table_name = '%s' AND c.row_id = %q.id)`, table, table)
+	}
+	return upd
 }
 
 // pkCache memoises primary-key lookups so we don't re-query the
@@ -1008,4 +1176,212 @@ func extractValues(dest []interface{}) []interface{} {
 		v[i] = string(b)
 	}
 	return v
+}
+
+// --- Rows the app created before migration 016 ---
+//
+// Before the app id range existed, an app insert took the next id after
+// the highest one in Supabase, i.e. just above MySQL's. When PHP later
+// issues that id, the sync overwrites the app's row with an unrelated
+// MySQL record. Rows with MySQL.max < id < AppIDBase exist only in
+// Supabase and have not been hit yet; they are listed on every run, and
+// --relocate-app-rows moves them into the app range.
+//
+// Moving a row changes its id, so everything pointing at it is updated
+// in the same transaction. A relocated pet gets a new id, which breaks
+// any QR tag already printed for it — hence opt-in.
+
+const appIDBase = 1000000000
+
+// references lists, per table, the columns elsewhere that hold its id.
+// Inventory taken from the Postgres catalogue (every column that holds a
+// pet, member, procedure or home-procedure id). pets."userId" and
+// memberlogin_options.foreign_id look similar but hold other things.
+var references = map[string][][2]string{
+	"vaccination": {{"procedure_files", "procedure_id"}, {"analysefile", "caseid"}},
+	"pets": {{"vaccination", "uuid"}, {"operationdate", "uuid"}, {"eals", "uuid"}, {"alergy", "uuid"},
+		{"homepro", "puuid"}, {"payments_ipay", "pet_id"}, {"procedure_files", "pet_id"}, {"paymethod", "uuid"},
+		{"calendar", "uuid"}, {"operation", "uuid"}, {"procedurebi", "uuid"}},
+	"memberlogin_members": {{"vaccination", "vetname"}, {"operationdate", "vetname"},
+		{"procedure_files", "uploaded_by"}, {"idempotency_keys", "user_id"}, {"email_verification_tokens", "user_id"},
+		{"memberlogin_files_members", "member_id"}, {"memberlogin_notes_members", "member_id"},
+		{"operation", "vetname"}, {"procedurebi", "vetname"}},
+	"homepro": {{"pro", "pruuid"}},
+}
+
+var relocatable = []string{"vaccination", "pets", "memberlogin_members", "paymethod", "shop", "prices",
+	"eals", "alergy", "operationdate", "homepro", "pro", "analysefile", "payments_ipay"}
+
+// handleEarlyAppRows returns how many early app rows remain unmoved.
+func handleEarlyAppRows(my, pg *sql.DB, relocate bool) int {
+	found, remaining := 0, 0
+	for _, t := range relocatable {
+		var myMax int64
+		if err := my.QueryRow(fmt.Sprintf("SELECT COALESCE(MAX(id), 0) FROM `%s`", t)).Scan(&myMax); err != nil {
+			continue
+		}
+		rows, err := pg.Query(fmt.Sprintf(`SELECT id FROM %q WHERE id > $1 AND id < $2 ORDER BY id`, t), myMax, appIDBase)
+		if err != nil {
+			continue
+		}
+		var ids []int64
+		for rows.Next() {
+			var id int64
+			if rows.Scan(&id) == nil {
+				ids = append(ids, id)
+			}
+		}
+		rows.Close()
+		if len(ids) == 0 {
+			continue
+		}
+		found += len(ids)
+		if !relocate || dryRun {
+			remaining += len(ids)
+			log.Printf("  WARN %s: %d row(s) created by the app before migration 016 (ids %v…) will be overwritten once MySQL reaches them. Run with --relocate-app-rows.",
+				t, len(ids), ids[:min(len(ids), 5)])
+			continue
+		}
+		if !haveAppChanges {
+			log.Fatal("--relocate-app-rows needs migrations 016/017: start the backend once, then re-run")
+		}
+		for _, id := range ids {
+			newID, err := relocateRow(pg, t, id)
+			if err != nil {
+				// Stop rather than sync over a half-moved dataset.
+				log.Fatalf("  relocating %s id=%d failed: %v — nothing after this was moved; fix and re-run", t, id, err)
+			}
+			log.Printf("  relocated %s id %d → %d", t, id, newID)
+		}
+	}
+	if found == 0 {
+		log.Println("  no early app rows below the app id range")
+	}
+	return remaining
+}
+
+func relocateRow(pg *sql.DB, table string, id int64) (int64, error) {
+	tx, err := pg.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`SET LOCAL vetapp.sync = 'on'`); err != nil {
+		return 0, err
+	}
+	// Hold the moved table and every referencing table against app writes.
+	lockTables := []string{table}
+	for _, ref := range references[table] {
+		lockTables = append(lockTables, ref[0])
+	}
+	sort.Strings(lockTables)
+	for _, t := range lockTables {
+		if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('vetapp-sync|' || $1))`, t); err != nil {
+			return 0, err
+		}
+	}
+	var seq sql.NullString
+	if err := tx.QueryRow(`SELECT pg_get_serial_sequence($1, 'id')`, "public."+table).Scan(&seq); err != nil || !seq.Valid {
+		return 0, fmt.Errorf("no id sequence")
+	}
+	// Make sure the sequence itself is in the app range, then draw from
+	// it: a floor applied to nextval's result would hand out the same id
+	// to every row moved before the sequence caught up.
+	if _, err := tx.Exec(fmt.Sprintf(`SELECT setval('%s', GREATEST((SELECT last_value FROM %s), %d))`, seq.String, seq.String, appIDBase)); err != nil {
+		return 0, err
+	}
+	var newID int64
+	if err := tx.QueryRow(fmt.Sprintf(`SELECT nextval('%s')`, seq.String)).Scan(&newID); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(fmt.Sprintf(`UPDATE %q SET id = $1 WHERE id = $2`, table), newID, id); err != nil {
+		return 0, err
+	}
+	for _, ref := range references[table] {
+		var dataType string
+		if err := tx.QueryRow(`SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2`,
+			ref[0], ref[1]).Scan(&dataType); err != nil {
+			continue // referencing table not present
+		}
+		q := fmt.Sprintf(`UPDATE %q SET %q = $1 WHERE %q = $2`, ref[0], ref[1], ref[1])
+		if dataType == "text" || strings.HasPrefix(dataType, "character") {
+			_, err = tx.Exec(q, fmt.Sprint(newID), fmt.Sprint(id))
+		} else {
+			_, err = tx.Exec(q, newID, id)
+		}
+		if err != nil {
+			return 0, fmt.Errorf("%s.%s: %w", ref[0], ref[1], err)
+		}
+	}
+	// A protection entry under the old id would make every future sync
+	// skip the unrelated MySQL row that later takes that id.
+	if _, err := tx.Exec(`DELETE FROM app_changes WHERE table_name = $1 AND row_id = $2`, table, id); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	delete(protected[table], id)
+	return newID, nil
+}
+
+// guardedTruncate empties every table for --full, but only if doing so
+// erases no new-app data — or the operator passed --discard-app-data.
+// The check and the TRUNCATEs run in one transaction holding every
+// table's sync lock, so no app write can land between them.
+func guardedTruncate(pg *sql.DB, tables []string, earlyRows int, discard bool) {
+	tx, err := pg.Begin()
+	if err != nil {
+		log.Fatalf("truncate: %v", err)
+	}
+	defer tx.Rollback()
+	must := func(q string, args ...interface{}) {
+		if _, err := tx.Exec(q, args...); err != nil {
+			log.Fatalf("truncate: %s: %v", q, err)
+		}
+	}
+	must(`SET LOCAL vetapp.sync = 'on'`)
+	sorted := append([]string(nil), tables...)
+	sort.Strings(sorted)
+	if haveAppChanges {
+		for _, t := range sorted {
+			must(`SELECT pg_advisory_xact_lock(hashtext('vetapp-sync|' || $1))`, t)
+		}
+	}
+	n := earlyRows
+	if haveAppChanges {
+		var c int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM app_changes`).Scan(&c); err != nil {
+			log.Fatalf("truncate: counting app changes: %v", err)
+		}
+		n += c
+	}
+	for _, t := range relocatable {
+		var c int
+		if err := tx.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM %q WHERE id >= %d`, t, appIDBase)).Scan(&c); err == nil {
+			n += c
+		}
+	}
+	if n > 0 && !discard {
+		log.Fatalf("--full would erase %d row(s) of new-app data (created, edited or deleted there). "+
+			"Use --update, which keeps them. Pass --discard-app-data only if losing them is intended.", n)
+	}
+	for _, t := range tables {
+		if t == "memberlogin_plugin_log" {
+			continue
+		}
+		if _, err := tx.Exec(fmt.Sprintf(`TRUNCATE TABLE %q CASCADE`, t)); err != nil {
+			log.Printf("  skip %s: %v", t, err)
+		}
+	}
+	if haveAppChanges {
+		// Discarded: nothing is protected any more, or the rebuild would
+		// skip the very MySQL rows it is meant to restore.
+		must(`TRUNCATE app_changes`)
+	}
+	if err := tx.Commit(); err != nil {
+		log.Fatalf("truncate commit: %v", err)
+	}
+	protected = map[string]map[int64]bool{}
+	log.Printf("  truncated %d table(s)", len(tables))
 }

@@ -23,33 +23,69 @@ identifier.
 |---|---|---|
 | (default) | rows whose id is missing from PG | append-only tables |
 | `--update` | missing rows **and** rows edited upstream | **routine, while PHP is live** |
-| `--full` | TRUNCATE + everything (implies `--update`) | rebuilding from scratch |
+| `--full` | TRUNCATE + everything (implies `--update`); refuses if new-app data exists | rebuilding from scratch |
+| `--relocate-app-rows` | moves pre-016 app rows into the app id range | once, after deploying migration 016 |
 | `--dry-run` | nothing; prints the diff | always, before a real run |
 
-## ⚠️ Data written directly to Supabase can be destroyed
+## Work done in the new app is kept (migration 016)
 
-MySQL is the source of truth and Supabase is a mirror, so `--update`
-overwrites any Supabase row whose id also exists upstream.
+MySQL stays the source of truth for rows that come from it, but the sync no
+longer destroys what the new app does:
 
-This is not hypothetical. `test@vetapp.ge` was created directly in
-Supabase and landed at `memberlogin_members.id = 843`. MySQL later
-issued 843 to a real customer. The next `--update` sync replaced the
-test account with that customer's row, and the login started failing
-with "session expired".
+| New app does | Before | Now |
+|---|---|---|
+| Edits a row that came from MySQL | reverted by the next `--update` | kept; the sync skips that row |
+| Deletes a row that came from MySQL | re-inserted as "missing" | stays deleted |
+| Creates a row | took the next id after MySQL's highest, so it was overwritten once PHP issued that id | gets an id from 1,000,000,000 up, which MySQL never reaches |
 
-**Until the PHP app retires:**
+How: a trigger on every legacy table the app writes to records each app-side
+edit or delete in `app_changes`; the sync skips those rows and re-applies the
+deletes. The sync marks its own writes (`SET LOCAL vetapp.sync = 'on'`) so they
+are not recorded. Updates that only touch login bookkeeping (`last_login`,
+`password_hash`, push/refresh tokens, verification flags) are not edits.
 
-- Treat Supabase as read-mostly. Anything created there — accounts,
-  pets, procedures — is at risk on the next sync if its id collides.
-- Create test accounts knowing they may vanish; note the id.
-- Real customer signups should go through the PHP app, or the two
-  systems will fight over the same id space.
-- Sequences are resynced after each run (`resyncSequences`), which
-  stops *new* Supabase rows colliding with *already-imported* ids —
-  but it cannot prevent MySQL later issuing an id Supabase already
-  used. Only retiring the old app removes that risk.
+App writes and sync writes on the same table take turns (migration 017): each
+app statement takes a shared per-table lock before touching rows, each sync batch
+takes it exclusively. Without this, an app edit committing while a sync statement
+waited on that row was overwritten anyway (reproduced before the fix). App writes
+wait at most one sync batch, a few milliseconds.
 
-At cutover, do a final `--full` sync, then stop writing to MySQL.
+Every run ends with a "Kept the new app's version" section listing how many
+MySQL rows were skipped per table.
+
+**What this does not do.** Sync is still one way. PHP users do not see
+anything done in the new app, and when the same record is changed in both
+systems the new app's version wins (PHP's change is skipped and counted in the
+report). Clinics should not work on the same pet in both systems during the
+overlap.
+
+### Rows created before migration 016
+
+Rows the app created earlier sit just above MySQL's highest id and will still
+be overwritten when PHP reaches them. Every run lists them
+(`WARN … created by the app before migration 016`). Move them into the app range:
+
+```bash
+go run ./cmd/sync --update --relocate-app-rows
+```
+
+References to a moved row are updated in the same transaction (a pet's
+procedures, appointments, allergies, home procedures, payments and files; a
+member's records and uploads). A moved **pet gets a new id**, so any QR tag
+already printed for it must be reprinted.
+
+Run it **once, right after deploying migrations 016/017**. Rows are detected by
+being above MySQL's current highest id; an app row whose id MySQL has *already*
+issued cannot be told apart from the MySQL row and has already been (or will be)
+overwritten. Those need manual reconciliation: compare `--dry-run`'s per-table
+"PG has N extra" counts with the rows the app is known to have created.
+
+### `--full` refuses to erase app data
+
+`--full` truncates every table. It now aborts if any new-app data exists; pass
+`--discard-app-data` only when losing it is intended.
+
+**At cutover, run a final `--update`, not `--full`,** then stop writing to MySQL.
 
 ## What the tool handles
 

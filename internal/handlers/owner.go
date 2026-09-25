@@ -108,14 +108,14 @@ type OwnerTestResult struct {
 // affordance — independent of `VetName`, so owners can self-report the
 // name of an external vet without losing those guarantees.
 type OwnerProcedureItem struct {
-	ID            string   `json:"id" validate:"required"`
-	Date          *string  `json:"date"`
-	NextDate      *string  `json:"nextDate"`
-	ProcedureType string   `json:"procedureType" validate:"required"`
-	ProcedureName string   `json:"procedureName" validate:"required"`
-	Diagnosis     string   `json:"diagnosis" validate:"required"`
-	Notes         string   `json:"notes" validate:"required"`
-	Comment       string   `json:"comment" validate:"required"`
+	ID            string            `json:"id" validate:"required"`
+	Date          *string           `json:"date"`
+	NextDate      *string           `json:"nextDate"`
+	ProcedureType string            `json:"procedureType" validate:"required"`
+	ProcedureName string            `json:"procedureName" validate:"required"`
+	Diagnosis     string            `json:"diagnosis" validate:"required"`
+	Notes         string            `json:"notes" validate:"required"`
+	Comment       string            `json:"comment" validate:"required"`
 	Anamnesis     string            `json:"anamnesis"`                   // tp=10x/20x — anamnesis. tp=1/2 — also surfaced if set.
 	Prescription  string            `json:"prescription"`                // dani column — prescription / დანიშნულება. Shown on every category.
 	VetName       string            `json:"vetName" validate:"required"` // raw column value (id or free-text)
@@ -430,8 +430,8 @@ func (h *OwnerPortalHandler) CreatePet(w http.ResponseWriter, r *http.Request) {
 	pet := models.Pet{
 		UUID:      claims.LastName, // Owner personal ID
 		Name:      req.Name,
-		Pet:       req.Pet,
-		Sex:       req.Sex,
+		Pet:       normalizeSpecies(req.Pet),
+		Sex:       normalizeSex(req.Sex),
 		Variety:   req.Variety,
 		Chip:      req.Chip,
 		Date:      req.Date,
@@ -475,19 +475,42 @@ func (h *OwnerPortalHandler) UpdatePet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var updates map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+	var body map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid request body"})
 		return
 	}
 
-	// Protect sensitive fields
-	delete(updates, "id")
-	delete(updates, "uuid")
-	delete(updates, "vet")
-	delete(updates, "status")
-	delete(updates, "birth2")
-	delete(updates, "code")
+	// Allowlist, as owner/updatepet2.php (minus the owner ID, which would
+	// hand the pet to someone else). A blocklist let any other column
+	// through — pets.happy, cast, the clinic's castdate, userId, …
+	updates := pickFields(body, "name", "pet", "sex", "variety", "chip", "chipd",
+		"date", "color", "petStatus", "phone", "first_name")
+	for k, v := range updates {
+		str, isString := v.(string)
+		if !isString {
+			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: k + " must be a string"})
+			return
+		}
+		if (k == "date" || k == "chipd") && str != "" && !isISODate(str) {
+			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: k + " must be YYYY-MM-DD"})
+			return
+		}
+	}
+	if v, ok := updates["pet"].(string); ok {
+		updates["pet"] = normalizeSpecies(v)
+	}
+	if v, ok := updates["sex"].(string); ok {
+		updates["sex"] = normalizeSex(v)
+	}
+	if name, ok := updates["name"].(string); ok && strings.TrimSpace(name) == "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "name is required"})
+		return
+	}
+	if len(updates) == 0 {
+		writeJSON(w, http.StatusOK, petToOwnerItem(*pet))
+		return
+	}
 
 	if err := h.db.Model(pet).Updates(updates).Error; err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to update pet"})
@@ -760,8 +783,6 @@ func onlyDigits(s string) bool {
 	return true
 }
 
-
-
 // Diseases returns the pet's allergies / chronic diseases from the
 // `eals` table (separate from the procedure history). The legacy app
 // stores these in their own table because they're conditions, not
@@ -899,28 +920,6 @@ func (h *OwnerPortalHandler) Calendar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
-// commaDate converts an ISO date ("2027-03-18") into the legacy
-// comma-separated form the PHP scheme stores in `vaccination.date3`
-// ("2027,03,18").
-//
-// Anything that isn't a plain ISO date is passed through untouched:
-// legacy rows carry sentinels like ",-1," and "--" in these columns and
-// rewriting them would corrupt data the clinic tooling still reads.
-func commaDate(iso string) string {
-	if len(iso) != 10 || iso[4] != '-' || iso[7] != '-' {
-		return iso
-	}
-	for i, c := range iso {
-		if i == 4 || i == 7 {
-			continue
-		}
-		if c < '0' || c > '9' {
-			return iso
-		}
-	}
-	return iso[0:4] + "," + iso[5:7] + "," + iso[8:10]
-}
-
 // procedureNameForTP returns the canonical Georgian procedure name for a
 // given numeric `tp` code. The mapping mirrors the legacy PHP scheme,
 // which is also what `ProcedureHandler.Types()` returns and what
@@ -986,63 +985,86 @@ func extractEctoItems(p *models.Procedure) []OwnerEctoItem {
 }
 
 // extractTestResults decodes a test record's panel results into labeled
-// rows. Test panels differ by species (`tp=2` dog, `tp=22` cat,
-// `tp=222` other) — each species' PHP form uses different columns for
-// different antigens. The dog panel layout below mirrors
-// `vet/addtest.php`. Cat / other variants don't have published label
-// tables yet; we fall back to generic "Test 1", "Test 2", … labels for
-// any non-empty column on those tps.
+// rows, using the same per-species form definitions the clinic records
+// them with (procedure_forms.go), so every result PHP or the web app
+// writes is shown under its real name.
 func extractTestResults(p *models.Procedure) []OwnerTestResult {
-	type slot struct {
-		label string
-		value string
-	}
-	var slots []slot
-
-	switch p.TP {
-	case 2: // dog test — vet/addtest.php
-		slots = []slot{
-			{"Leishmania", p.VacN},
-			{"Canine Babesia", p.Deh},
-			{"GiarDia duodenalis", p.Vac1},
-			{"Canine distemper", p.Vac2},
-			{"Caniv4 — Heartworm", p.Vac3},
-			{"Caniv4 — Lyme", p.Vac4},
-			{"Caniv4 — Anaplasma", p.Vac5},
-			{"Caniv4 — E.Canis", p.Vac6},
-			{"Caniv 4DX — Ehrlichia", p.Test1},
-			{"Caniv 4DX — Babesia", p.Test2},
-			{"Caniv 4DX — Anaplasma", p.Test3},
-			{"Caniv 4DX — Heartworm", p.Test4},
-			{"CDV/CAV — CDV Ag", p.Test5},
-			{"CDV/CAV — ACAV-II Ag", p.Test6},
-			{"cCRP Ag", p.Test7},
-			{"RLN Test", p.Test8},
-		}
-	case 22, 222: // cat / other — fallback to generic labels until panels are mapped
-		slots = []slot{
-			{"Test 1", p.VacN},
-			{"Test 2", p.Deh},
-			{"Test 3", p.Vac1},
-			{"Test 4", p.Vac2},
-			{"Test 5", p.Vac3},
-			{"Test 6", p.Vac4},
-			{"Test 7", p.Vac5},
-			{"Test 8", p.Vac6},
-		}
-	default:
+	form := testFormFor(p.TP)
+	if form == nil {
 		return nil
 	}
-
 	var items []OwnerTestResult
-	for _, s := range slots {
-		v := strings.TrimSpace(s.value)
+	for _, f := range form.Fields {
+		if f.Kind != "result" && !(p.TP == 222 && f.Column == "ser") {
+			continue
+		}
+		v := strings.TrimSpace(procedureColumn(p, f.Column))
 		if v == "" {
 			continue
 		}
-		items = append(items, OwnerTestResult{Label: s.label, Result: v})
+		label := f.Label
+		if f.Group != "" {
+			label = f.Group + " — " + f.Label
+		}
+		if p.TP == 222 { // free-text test: name in vac, result in ser
+			label = strings.TrimSpace(p.Vac)
+		}
+		items = append(items, OwnerTestResult{Label: label, Result: v})
 	}
 	return items
+}
+
+// procedureColumn reads a vaccination column by name.
+func procedureColumn(p *models.Procedure, col string) string {
+	switch col {
+	case "vac":
+		return p.Vac
+	case "vacn":
+		return p.VacN
+	case "deh":
+		return p.Deh
+	case "ser":
+		return p.Ser
+	case "vac1":
+		return p.Vac1
+	case "vac2":
+		return p.Vac2
+	case "vac3":
+		return p.Vac3
+	case "vac4":
+		return p.Vac4
+	case "vac5":
+		return p.Vac5
+	case "vac6":
+		return p.Vac6
+	case "vac7":
+		return p.Vac7
+	case "vac8":
+		return p.Vac8
+	case "vac9":
+		return p.Vac9
+	case "test1":
+		return p.Test1
+	case "test2":
+		return p.Test2
+	case "test3":
+		return p.Test3
+	case "test4":
+		return p.Test4
+	case "test5":
+		return p.Test5
+	case "test6":
+		return p.Test6
+	case "test7":
+		return p.Test7
+	case "test8":
+		return p.Test8
+	case "address":
+		return p.Address
+	case "sax":
+		return p.Sax
+	}
+	return ""
 }
 
 // isGenericProcedureTP reports whether the given tp uses the "generic
@@ -1178,17 +1200,10 @@ func (h *OwnerPortalHandler) CreateProcedure(w http.ResponseWriter, r *http.Requ
 		tpName = procedureNameForTP(req.TP)
 	}
 
-	// `date3` is the legacy comma-formatted mirror of the reminder date
-	// `date2` ("2027,03,18" for date2 "2027-03-18") — the PHP clinic
-	// tooling writes both and reads date3. The mobile client never sends
-	// it, so without this every owner-created reminder was stored with
-	// date3="" and then dropped by the calendar query, which filters on
-	// date3. Derive it here rather than making the client supply a
-	// redundant second encoding of a date it already sent.
-	date3 := req.Date3
-	if date3 == "" {
-		date3 = commaDate(req.Date2)
-	}
+	// `date3` is date2 in the PHP calendar's JavaScript-month encoding —
+	// see legacyDate3. Always derived: the mobile client never sends it,
+	// and a client-supplied value could disagree with date2.
+	date3 := legacyDate3(req.Date2)
 
 	proc := models.Procedure{
 		UUID:   petID,
@@ -1297,7 +1312,8 @@ func (h *OwnerPortalHandler) Visits(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var appointments []models.Appointment
-	h.db.Where("owner = ?", personalID).Order("date DESC, time ASC").Find(&appointments)
+	// date2 is the appointment day (see models.Appointment).
+	h.db.Where("owner = ?", personalID).Order("date2 DESC, time ASC").Find(&appointments)
 
 	// Resolve vet member IDs to display names in one query, the same way
 	// the procedures endpoint does.
@@ -1319,19 +1335,25 @@ func (h *OwnerPortalHandler) Visits(w http.ResponseWriter, r *http.Request) {
 	}
 	petNames := make(map[string]string, len(petIDSet))
 	if len(petIDSet) > 0 {
-		ids := make([]string, 0, len(petIDSet))
+		// Integer ids so the lookup uses pets_pkey; `id::text IN` scanned
+		// the whole table.
+		ids := make([]uint64, 0, len(petIDSet))
 		for id := range petIDSet {
-			ids = append(ids, id)
+			if n, err := strconv.ParseUint(id, 10, 32); err == nil {
+				ids = append(ids, n)
+			}
 		}
 		type petRow struct {
 			ID   string
 			Name string
 		}
 		var rows []petRow
-		h.db.Table("pets").
-			Select("id::text AS id, name").
-			Where("id::text IN ?", ids).
-			Scan(&rows)
+		if len(ids) > 0 {
+			h.db.Table("pets").
+				Select("id::text AS id, name").
+				Where("id IN ?", ids).
+				Scan(&rows)
+		}
 		for _, p := range rows {
 			if n := strings.TrimSpace(p.Name); n != "" {
 				petNames[p.ID] = n
@@ -1339,7 +1361,7 @@ func (h *OwnerPortalHandler) Visits(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	today := time.Now().Format("2006-01-02")
+	today := todayGeorgia()
 
 	items := make([]OwnerVisit, len(appointments))
 	for i, a := range appointments {

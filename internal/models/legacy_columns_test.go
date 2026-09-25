@@ -123,19 +123,24 @@ func TestNormalizePayMethod(t *testing.T) {
 // coment, tp, price, sax, pet, vetname, time) — no phone, tpname,
 // koment or status column, and getting this wrong meant clinics could
 // not book an appointment at all.
+// Date is the appointment day, which PHP keeps in date2; `date` is the
+// day the booking was made. Mapping Date to `date` put every appointment
+// on its booking day.
 func TestAppointmentColumns(t *testing.T) {
 	assertColumns(t, &Appointment{}, map[string]string{
-		"ID":      "id",
-		"UUID":    "uuid",
-		"Date":    "date",
-		"Time":    "time",
-		"SK":      "sk",
-		"VetName": "vetname",
-		"PName":   "pname",
-		"Owner":   "owner",
-		"OwnerN":  "ownern",
-		"TPName":  "operation",
-		"Koment":  "coment",
+		"ID":       "id",
+		"UUID":     "uuid",
+		"Date":     "date2",
+		"BookedOn": "date",
+		"Date3":    "date3",
+		"Time":     "time",
+		"SK":       "sk",
+		"VetName":  "vetname",
+		"PName":    "pname",
+		"Owner":    "owner",
+		"OwnerN":   "ownern",
+		"TPName":   "operation",
+		"Koment":   "coment",
 	})
 }
 
@@ -150,4 +155,21 @@ func TestAppointmentIgnoresAbsentColumns(t *testing.T) {
 			t.Errorf("column %q is persisted but does not exist on operationdate", name)
 		}
 	}
+}
+
+// eals keeps the allergy in `vac` and the note in `ser`
+// (vet/addeals.php); `name` is empty on every production row.
+func TestAllergyColumns(t *testing.T) {
+	assertColumns(t, &Allergy{}, map[string]string{
+		"Name":    "vac",
+		"Comment": "ser",
+		"SK":      "sk",
+	})
+}
+
+func TestPetDateColumns(t *testing.T) {
+	assertColumns(t, &Pet{}, map[string]string{
+		"ChipDate": "chipd",
+		"CastDate": "castdate",
+	})
 }

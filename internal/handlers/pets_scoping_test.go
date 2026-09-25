@@ -61,10 +61,10 @@ func TestPetHandlersAreClinicScoped(t *testing.T) {
 		})
 		src := body.String()
 
-		// Either the handler filters on the clinic inline, or it
-		// delegates to the shared guard.
-		scoped := strings.Contains(src, "petBelongsToClinic") ||
-			(strings.Contains(src, "Zip") && strings.Contains(src, "vet ="))
+		// canAccessPet admits the pet's own clinic and clinics that have
+		// treated it; Delete is admin-only instead.
+		scoped := strings.Contains(src, "canAccessPet") ||
+			(name == "Delete" && strings.Contains(src, "isAdmin"))
 
 		if !scoped {
 			t.Errorf("PetHandler.%s does not scope the pet to the caller's clinic — "+

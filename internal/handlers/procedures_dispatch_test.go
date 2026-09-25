@@ -198,17 +198,45 @@ func TestExtractTestResults(t *testing.T) {
 		}
 	})
 
-	t.Run("cat test (tp=22) uses generic labels", func(t *testing.T) {
+	t.Run("cat test (tp=22) uses the addtest1.php panel names", func(t *testing.T) {
 		p := models.Procedure{
 			TP:   22,
 			VacN: "უარყოფითი",
 			Vac1: "დადებითი",
+			Vac:  "დადებითი",
 		}
 		got := extractTestResults(&p)
 		want := []OwnerTestResult{
-			{Label: "Test 1", Result: "უარყოფითი"},
-			{Label: "Test 3", Result: "დადებითი"},
+			{Label: "Feline leukemia (FeLV)", Result: "დადებითი"},
+			{Label: "GiarDia", Result: "დადებითი"},
+			{Label: "Feline infectious peritonitis", Result: "უარყოფითი"},
 		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("extractTestResults = %+v, want %+v", got, want)
+		}
+	})
+
+	// vet/view2.php reads CCov from ser, Giardia from address and
+	// Erlichia canis from sax — columns that mean something else on
+	// every other tp.
+	t.Run("dog test reads the reused ser/address/sax columns", func(t *testing.T) {
+		p := models.Procedure{TP: 2, Vac7: "უარყოფითი", Ser: "დადებითი", Address: "უარყოფითი", Sax: "დადებითი"}
+		got := extractTestResults(&p)
+		want := []OwnerTestResult{
+			{Label: "CPV/CCov/Giardia — CPV", Result: "უარყოფითი"},
+			{Label: "CPV/CCov/Giardia — CCov", Result: "დადებითი"},
+			{Label: "CPV/CCov/Giardia — Giardia", Result: "უარყოფითი"},
+			{Label: "Erlichia Canis", Result: "დადებითი"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("extractTestResults = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("other-species test shows its free-text name and result", func(t *testing.T) {
+		p := models.Procedure{TP: 222, Vac: "PCR", Ser: "დადებითი"}
+		got := extractTestResults(&p)
+		want := []OwnerTestResult{{Label: "PCR", Result: "დადებითი"}}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("extractTestResults = %+v, want %+v", got, want)
 		}
@@ -446,33 +474,33 @@ func TestOwnerWriteAllowedTPs(t *testing.T) {
 	}
 }
 
-// commaDate converts the reminder date into the legacy comma format
-// stored in vaccination.date3. Legacy sentinels must survive untouched
-// — the clinic's PHP tooling still reads these columns, and rewriting
-// ",-1," or "--" into something "cleaner" would corrupt live rows.
-func TestCommaDate(t *testing.T) {
+// legacyDate3 must reproduce what the PHP vet forms store in
+// vaccination.date3: date2 shifted back one month (JavaScript's
+// zero-based month), with PHP strtotime's month-overflow behaviour.
+// Checked against production: 40,966 of 45,738 PHP-written rows match
+// byte for byte; the rest were written by the owner forms (unpadded
+// month) or by this backend before the fix (date3 == date2).
+func TestLegacyDate3(t *testing.T) {
 	cases := []struct {
 		in   string
 		want string
 	}{
-		// ISO dates convert.
-		{"2027-03-18", "2027,03,18"},
-		{"2026-12-31", "2026,12,31"},
-		{"2000-01-01", "2000,01,01"},
-		// Legacy sentinels and junk pass through unchanged.
+		{"2027-03-18", "2027,02,18"},
+		{"2026-01-15", "2025,12,15"}, // year boundary
+		{"2026-12-31", "2026,12,01"}, // "Nov 31" overflows to Dec 1...
+		{"2026-03-31", "2026,03,03"}, // ...exactly like strtotime("-1 month")
+		{"2024-03-31", "2024,03,02"}, // leap year
+		// Anything that is not a real ISO date yields no date3.
 		{"", ""},
-		{"--", "--"},
-		{",-1,", ",-1,"},
-		{"2027,03,18", "2027,03,18"},
-		// Wrong shape or non-digits: leave alone rather than mangle.
-		{"2027-3-18", "2027-3-18"},
-		{"not-a-date", "not-a-date"},
-		{"20270318", "20270318"},
-		{"abcd-ef-gh", "abcd-ef-gh"},
+		{"--", ""},
+		{",-1,", ""},
+		{"2027-3-18", ""},
+		{"2027-02-30", ""},
+		{"not-a-date", ""},
 	}
 	for _, tc := range cases {
-		if got := commaDate(tc.in); got != tc.want {
-			t.Errorf("commaDate(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := legacyDate3(tc.in); got != tc.want {
+			t.Errorf("legacyDate3(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

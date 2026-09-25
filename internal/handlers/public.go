@@ -44,7 +44,7 @@ type ProcedureCategoryCount struct {
 
 // PublicPetResponse is the full public pet profile.
 type PublicPetResponse struct {
-	Pet        PublicPetInfo           `json:"pet"`
+	Pet        PublicPetInfo            `json:"pet"`
 	Categories []ProcedureCategoryCount `json:"categories"`
 }
 
@@ -124,13 +124,13 @@ func (h *PublicHandler) LookupByCode(w http.ResponseWriter, r *http.Request) {
 
 // PublicProcedureItem is a single procedure in the public view.
 type PublicProcedureItem struct {
-	ID       string  `json:"id"`
-	Date     string  `json:"date"`
-	NextDate string  `json:"nextDate,omitempty"`
-	Name     string  `json:"name,omitempty"`
+	ID        string `json:"id"`
+	Date      string `json:"date"`
+	NextDate  string `json:"nextDate,omitempty"`
+	Name      string `json:"name,omitempty"`
 	Diagnosis string `json:"diagnosis,omitempty"`
-	Notes    string  `json:"notes,omitempty"`
-	VetName  string  `json:"vetName,omitempty"`
+	Notes     string `json:"notes,omitempty"`
+	VetName   string `json:"vetName,omitempty"`
 }
 
 // GetPetProcedures returns public procedure list for a pet, filtered by tp.
@@ -162,10 +162,10 @@ func (h *PublicHandler) GetPetProcedures(w http.ResponseWriter, r *http.Request)
 		items := make([]PublicProcedureItem, 0, len(allergies))
 		for _, a := range allergies {
 			items = append(items, PublicProcedureItem{
-				ID:        strconv.Itoa(int(a.ID)),
-				Date:      a.Date,
-				Name:      a.Name,
-				Notes:     "",
+				ID:    strconv.Itoa(int(a.ID)),
+				Date:  a.Date,
+				Name:  a.Name,
+				Notes: "",
 			})
 		}
 		writeJSON(w, http.StatusOK, items)
