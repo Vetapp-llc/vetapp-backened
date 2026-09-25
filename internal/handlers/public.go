@@ -135,9 +135,9 @@ func (h *PublicHandler) sharedPet(r *http.Request) (models.Pet, bool) {
 // @Router /public/pets/code/{code} [get]
 func (h *PublicHandler) LookupByCode(w http.ResponseWriter, r *http.Request) {
 	if !publicCodeLimiter.Allow(r.RemoteAddr) || !publicCodeGlobalLimiter.Allow("all") {
+		wait := max(publicCodeLimiter.RetryAfter(r.RemoteAddr), publicCodeGlobalLimiter.RetryAfter("all"))
 		writeJSON(w, http.StatusTooManyRequests, ErrorResponse{
-			Error: "too many attempts", Code: codeRateLimited,
-			RetryAfter: int(publicCodeLimiter.RetryAfter(r.RemoteAddr).Seconds()) + 1,
+			Error: "too many attempts", Code: codeRateLimited, RetryAfter: int(wait.Seconds()) + 1,
 		})
 		return
 	}
@@ -147,16 +147,26 @@ func (h *PublicHandler) LookupByCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var petID uint
-	h.db.Raw(`SELECT pet_id FROM pet_share_tokens WHERE token = ? AND kind = 'pin' AND expires_at > NOW()`, code).
-		Scan(&petID)
+	var pin struct {
+		PetID     uint
+		ExpiresAt time.Time
+	}
+	h.db.Raw(`SELECT pet_id, expires_at FROM pet_share_tokens WHERE token = ? AND kind = 'pin' AND expires_at > NOW()`, code).
+		Scan(&pin)
 	var pet models.Pet
-	if petID == 0 || h.db.First(&pet, petID).Error != nil {
+	if pin.PetID == 0 || h.db.First(&pet, pin.PetID).Error != nil {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
 		return
 	}
+	// The page loads the history with a link token that lives as long
+	// as the PIN.
+	grant, err := newLinkToken(h.db, pet.ID, pin.ExpiresAt)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "lookup failed"})
+		return
+	}
 
-	h.writePetProfile(w, pet, code)
+	h.writePetProfile(w, pet, grant.Token)
 }
 
 // PublicProcedureItem is a single procedure in the public view.

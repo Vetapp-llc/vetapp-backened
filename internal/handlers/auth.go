@@ -373,6 +373,15 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	tx := h.db.Begin()
 	defer tx.Rollback()
 	tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('register|' || ?))`, personalID)
+	// And on the email, so two sign-ups with one address (different IDs)
+	// cannot both pass the check above.
+	tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('register-email|' || LOWER(TRIM(?))))`, email)
+	var emailTaken int64
+	tx.Model(&models.User{}).Where("LOWER(TRIM(email)) = LOWER(TRIM(?))", email).Count(&emailTaken)
+	if emailTaken > 0 {
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "email already registered", Code: codeEmailTaken})
+		return
+	}
 	var taken int64
 	tx.Model(&models.User{}).
 		Where("TRIM(last_name) = ? AND group_id = ?", personalID, models.RoleOwner).
@@ -1277,8 +1286,10 @@ func (h *AuthHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, MessageResponse{Message: "password reset successfully"})
 }
 
-// otpMaxTries locks an OTP after this many wrong codes.
-const otpMaxTries = 5
+// otpMaxTries is an OTP's attempt budget: every check (right or wrong)
+// spends one, atomically, so parallel guesses cannot exceed it. A
+// recovery uses two (verify, then reset).
+const otpMaxTries = 8
 
 // otpLifetime is how long a sent code stays valid: long enough to read
 // the SMS and, for recovery, pick a new password (the code is consumed
@@ -1300,19 +1311,24 @@ func checkOTP(db *gorm.DB, otpID uint, code, typ, phone string) (models.OTP, int
 	if (typ != "" && otp.Type != typ) || (phone != "" && normalizePhone(otp.Phone) != phone) {
 		return otp, http.StatusUnauthorized, invalid
 	}
-	if otp.Used || time.Now().After(otp.ExpiresAt) || otp.Tries >= otpMaxTries {
-		return otp, http.StatusUnauthorized, &ErrorResponse{Error: "code expired or already used", Code: codeOTPExpired}
+	expired := &ErrorResponse{Error: "code expired or already used", Code: codeOTPExpired}
+	// expires_at is compared with a Go time, the way it was written: the
+	// column has no time zone, so NOW() would be off by the session zone.
+	spend := db.Exec(`UPDATE otp_codes SET tries = tries + 1
+		WHERE id = ? AND used = false AND expires_at > ? AND tries < ?`, otp.ID, time.Now(), otpMaxTries)
+	if spend.Error != nil || spend.RowsAffected != 1 {
+		return otp, http.StatusUnauthorized, expired
 	}
 	if subtle.ConstantTimeCompare([]byte(otp.Code), []byte(strings.TrimSpace(code))) != 1 {
-		db.Model(&otp).UpdateColumn("tries", gorm.Expr("tries + 1"))
 		return otp, http.StatusUnauthorized, invalid
 	}
 	return otp, 0, nil
 }
 
-// consumeOTP marks the OTP used; false if another request got there first.
+// consumeOTP marks the OTP used; false if another request got there
+// first or it expired meanwhile.
 func consumeOTP(tx *gorm.DB, id uint) bool {
-	res := tx.Model(&models.OTP{}).Where("id = ? AND used = ?", id, false).Update("used", true)
+	res := tx.Exec(`UPDATE otp_codes SET used = true WHERE id = ? AND used = false AND expires_at > ?`, id, time.Now())
 	return res.Error == nil && res.RowsAffected == 1
 }
 

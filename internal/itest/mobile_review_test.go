@@ -225,6 +225,9 @@ func TestPublicPetPagesNeedAShareToken(t *testing.T) {
 		t.Fatalf("pin lookup %s", r.Body)
 	}
 	expect(t, call(t, 0, "GET", "/api/public/pets/"+pb+"/procedures?s="+prof.ShareToken, nil), http.StatusOK)
+	// A PIN is not itself a key to the pages (it could be guessed there
+	// without the lookup's rate limit).
+	expect(t, call(t, 0, "GET", "/api/public/pets/"+pb+"/procedures?s="+pin.Code, nil), http.StatusNotFound)
 	// A new PIN replaces the old one.
 	var pin2 struct{ Code string }
 	call(t, owner, "GET", "/api/owner/pets/"+pb+"/code", nil).json(t, &pin2)
@@ -235,6 +238,7 @@ func TestPublicPetPagesNeedAShareToken(t *testing.T) {
 	must(t, db.Exec(`UPDATE pet_share_tokens SET expires_at = NOW() - INTERVAL '1 minute'`).Error)
 	expect(t, call(t, 0, "GET", "/api/public/pets/"+pa+"?s="+link.Token, nil), http.StatusNotFound)
 	expect(t, call(t, 0, "GET", "/api/public/pets/code/"+pin2.Code, nil), http.StatusNotFound)
+	expect(t, call(t, 0, "GET", "/api/public/pets/"+pb+"?s="+prof.ShareToken, nil), http.StatusNotFound)
 	// Another owner's pet id is not the caller's to share.
 	expect(t, call(t, vetA, "GET", "/api/owner/pets/"+pa+"/share-link", nil), http.StatusForbidden)
 }
@@ -265,6 +269,38 @@ func TestPaymentReturnPage(t *testing.T) {
 		expect(t, r, http.StatusOK)
 		if !strings.Contains(string(r.Body), "VetApp") {
 			t.Fatalf("return page %q: %s", st, r.Body)
+		}
+	}
+}
+
+// Codex re-review: parallel wrong guesses could all pass the tries check.
+func TestOTPAttemptBudgetHoldsUnderConcurrency(t *testing.T) {
+	reset(t)
+	id, _ := registerOTP(t, "555333444")
+	codes := raceN(t, 12, func() resp {
+		return call(t, 0, "POST", "/api/auth/otp/verify", map[string]interface{}{"otp_id": id, "code": "000000"})
+	})
+	var tries int
+	db.Raw(`SELECT tries FROM otp_codes WHERE id = ?`, id).Scan(&tries)
+	if tries > 8 {
+		t.Fatalf("tries = %d after 12 parallel guesses, budget is 8 (%v)", tries, codes)
+	}
+	// Budget spent: even the right code is refused now.
+	r := call(t, 0, "POST", "/api/auth/otp/verify", map[string]interface{}{"otp_id": id, "code": "123456"})
+	if r.Code != http.StatusUnauthorized || errCode(t, r) != "otp_expired" {
+		t.Fatalf("right code after lockout: %d %s", r.Code, r.Body)
+	}
+}
+
+func TestLegacyPhoneFormatsMatchOnRecovery(t *testing.T) {
+	for _, stored := range []string{"0599000000", "00995599000000", "+995-599-00-00-00"} {
+		reset(t)
+		must(t, db.Model(&models.User{}).Where("id = ?", owner).Update("phone", stored).Error)
+		var n int64
+		db.Model(&models.User{}).Where(`(phone = ? OR regexp_replace(regexp_replace(phone, '[^0-9+]', '', 'g'),
+	'^([+]|00){0,1}(995|0){0,1}(5[0-9]{8})$', '\3') = ?)`, "599000000", "599000000").Count(&n)
+		if n != 1 {
+			t.Fatalf("stored %q not matched", stored)
 		}
 	}
 }

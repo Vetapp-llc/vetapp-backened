@@ -563,26 +563,17 @@ func (h *SubscriptionHandler) AppleVerify(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// The package: the one whose apple_product_id is the receipt's
-	// productId; an explicit package_id must agree with it.
+	// The package is the one whose apple_product_id is the receipt's
+	// productId — never the client's word, which would let a cheap
+	// receipt buy an expensive package. An explicit package_id must agree.
 	var pkg models.Package
-	if req.PackageID != 0 {
-		if err := h.db.First(&pkg, req.PackageID).Error; err != nil {
-			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "package not found"})
-			return
-		}
-	} else if err := h.db.Where("apple_product_id = ?", txInfo.ProductID).First(&pkg).Error; err != nil {
+	if txInfo.ProductID == "" || h.db.Where("apple_product_id = ?", txInfo.ProductID).First(&pkg).Error != nil {
 		log.Warn("apple_verify_unknown_product", "product_id", txInfo.ProductID)
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "package not found"})
 		return
 	}
-
-	// Product ID check — the package must match the productId in the
-	// signed receipt. Skipped if the package doesn't have an
-	// apple_product_id configured (legacy rows during rollout); after
-	// backfill the audit can flip to fail-closed.
-	if pkg.AppleProductID != "" && txInfo.ProductID != pkg.AppleProductID {
-		log.Warn("apple_verify_wrong_product", "expected", pkg.AppleProductID, "received", txInfo.ProductID)
+	if req.PackageID != 0 && req.PackageID != pkg.ID {
+		log.Warn("apple_verify_wrong_product", "package_id", req.PackageID, "received", txInfo.ProductID)
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "receipt product mismatch"})
 		return
 	}
@@ -625,6 +616,15 @@ func (h *SubscriptionHandler) AppleVerify(w http.ResponseWriter, r *http.Request
 		return tx.Model(&models.Pet{}).Where("id = ?", req.PetID).
 			Updates(map[string]interface{}{"status": 1, "birth2": expiry}).Error
 	})
+	if err != nil && h.db.Where("order_id = ? AND provider = 'apple'", txInfo.TransactionID).First(&existing).Error == nil {
+		// A simultaneous retry of this transaction won the insert.
+		if strings.TrimSpace(existing.UUID) == formatUint(req.PetID) {
+			writeJSON(w, http.StatusOK, AppleVerifyResponse{Message: "subscription activated", AlreadyProcessed: true})
+			return
+		}
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "transaction already used for another pet"})
+		return
+	}
 	if err != nil {
 		log.Error("apple_verify_persist_failed", "transaction_id", txInfo.TransactionID, "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to record subscription"})

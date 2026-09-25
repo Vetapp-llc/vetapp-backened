@@ -28,28 +28,52 @@ type ShareTokenResponse struct {
 // issueSharePIN gives the pet a fresh 6-digit PIN, replacing its previous
 // one. The PIN is the table's primary key, so two pets can never hold the
 // same live PIN; expired rows are cleared first so their numbers free up.
+// A per-pet lock keeps two simultaneous requests from leaving two PINs.
 func issueSharePIN(db *gorm.DB, petID uint) (ShareTokenResponse, error) {
-	db.Exec(`DELETE FROM pet_share_tokens WHERE expires_at < NOW()`)
-	db.Exec(`DELETE FROM pet_share_tokens WHERE pet_id = ? AND kind = 'pin'`, petID)
 	expires := time.Now().Add(sharePINLifetime).UTC().Truncate(time.Second)
-	for i := 0; i < 20; i++ {
-		pin, err := numericCode(6)
-		if err != nil {
-			return ShareTokenResponse{}, err
+	var out ShareTokenResponse
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('pet-pin|' || ?))`, petID).Error; err != nil {
+			return err
 		}
-		res := db.Exec(`INSERT INTO pet_share_tokens (token, pet_id, kind, expires_at)
-			VALUES (?, ?, 'pin', ?) ON CONFLICT (token) DO NOTHING`, pin, petID, expires)
-		if res.Error != nil {
-			return ShareTokenResponse{}, res.Error
+		if err := tx.Exec(`DELETE FROM pet_share_tokens WHERE expires_at < NOW() OR (pet_id = ? AND kind = 'pin')`, petID).Error; err != nil {
+			return err
 		}
-		if res.RowsAffected == 1 {
-			return ShareTokenResponse{Token: pin, ExpiresAt: expires}, nil
+		for i := 0; i < 20; i++ {
+			pin, err := numericCode(6)
+			if err != nil {
+				return err
+			}
+			res := tx.Exec(`INSERT INTO pet_share_tokens (token, pet_id, kind, expires_at)
+				VALUES (?, ?, 'pin', ?) ON CONFLICT (token) DO NOTHING`, pin, petID, expires)
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 1 {
+				out = ShareTokenResponse{Token: pin, ExpiresAt: expires}
+				return nil
+			}
 		}
-	}
-	return ShareTokenResponse{}, errShareExhausted
+		return errShareExhausted
+	})
+	return out, err
 }
 
 var errShareExhausted = errors.New("could not allocate a share code")
+
+// newLinkToken stores a fresh random link token for the pet.
+func newLinkToken(db *gorm.DB, petID uint, expires time.Time) (ShareTokenResponse, error) {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return ShareTokenResponse{}, err
+	}
+	tok := base64.RawURLEncoding.EncodeToString(b)
+	if err := db.Exec(`INSERT INTO pet_share_tokens (token, pet_id, kind, expires_at) VALUES (?, ?, 'link', ?)`,
+		tok, petID, expires).Error; err != nil {
+		return ShareTokenResponse{}, err
+	}
+	return ShareTokenResponse{Token: tok, ExpiresAt: expires}, nil
+}
 
 // shareLink returns the pet's link token, reusing the current one while
 // it has more than a day left so a QR code on screen stays stable.
@@ -61,20 +85,12 @@ func shareLink(db *gorm.DB, petID uint) (ShareTokenResponse, error) {
 	if err == nil && cur.Token != "" {
 		return cur, nil
 	}
-	b := make([]byte, 24)
-	if _, err := rand.Read(b); err != nil {
-		return ShareTokenResponse{}, err
-	}
-	tok := base64.RawURLEncoding.EncodeToString(b)
-	expires := time.Now().Add(shareLinkLifetime).UTC().Truncate(time.Second)
-	if err := db.Exec(`INSERT INTO pet_share_tokens (token, pet_id, kind, expires_at) VALUES (?, ?, 'link', ?)`,
-		tok, petID, expires).Error; err != nil {
-		return ShareTokenResponse{}, err
-	}
-	return ShareTokenResponse{Token: tok, ExpiresAt: expires}, nil
+	return newLinkToken(db, petID, time.Now().Add(shareLinkLifetime).UTC().Truncate(time.Second))
 }
 
 // shareGranted reports whether the request's `s` token opens petID.
+// Only link tokens count: a PIN is exchanged for one by the rate-limited
+// PIN lookup, so PINs cannot be guessed through these endpoints.
 //
 // PUBLIC_QR_ALLOW_UNSIGNED=1 re-opens the old bare-id links for a
 // transition period (QR codes shown by app builds that predate tokens).
@@ -87,7 +103,7 @@ func shareGranted(db *gorm.DB, r *http.Request, petID uint) bool {
 		return false
 	}
 	var n int64
-	db.Raw(`SELECT COUNT(*) FROM pet_share_tokens WHERE token = ? AND pet_id = ? AND expires_at > NOW()`,
+	db.Raw(`SELECT COUNT(*) FROM pet_share_tokens WHERE token = ? AND pet_id = ? AND kind = 'link' AND expires_at > NOW()`,
 		tok, petID).Scan(&n)
 	return n > 0
 }

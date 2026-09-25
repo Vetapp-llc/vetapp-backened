@@ -46,9 +46,12 @@ func normalizePhone(raw string) string {
 }
 
 // phoneMatchSQL matches a stored phone against a normalized one,
-// tolerating the other formats older rows hold ("+995…", "995…",
-// spaces). Use with two args: the normalized phone twice.
-const phoneMatchSQL = `(phone = ? OR regexp_replace(regexp_replace(phone, '[^0-9+]', '', 'g'), '^[+]{0,1}995(5[0-9]{8})$', '\1') = ?)`
+// canonicalising the stored value the way normalizePhone does for
+// Georgian mobiles ("+995…", "00995…", "995…", "05…", spaces, dashes).
+// Use with two args: the normalized phone twice. (No literal "?" in the
+// SQL: GORM would take it for a placeholder.)
+const phoneMatchSQL = `(phone = ? OR regexp_replace(regexp_replace(phone, '[^0-9+]', '', 'g'),
+	'^([+]|00){0,1}(995|0){0,1}(5[0-9]{8})$', '\3') = ?)`
 
 // smsDestination is the number format the SMS gateway expects: the
 // legacy app sent Georgian numbers as nine local digits, which works;

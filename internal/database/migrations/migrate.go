@@ -35,13 +35,21 @@ const migrationAdvisoryLockKey = 728145
 // Holds a Postgres advisory lock for the duration so two booting
 // instances can't apply the same migration concurrently.
 func Run(db *gorm.DB) error {
-	// Acquire advisory lock — blocks until any other migrating instance
-	// finishes. Postgres releases it automatically when the session
-	// ends; we also unlock explicitly for cleanliness.
-	if err := db.Exec(`SELECT pg_advisory_lock(?)`, migrationAdvisoryLockKey).Error; err != nil {
+	// Acquire the advisory lock — blocks until any other migrating
+	// instance finishes. It is a transaction lock held by a transaction
+	// kept open for the whole run: through PgBouncer's transaction pooler
+	// a session lock and its unlock can land on different server
+	// connections, leaving the lock stuck. The migrations themselves run
+	// on other connections (some, like CREATE INDEX CONCURRENTLY, cannot
+	// run inside a transaction). Rolling back releases the lock.
+	lock := db.Begin()
+	if lock.Error != nil {
+		return lock.Error
+	}
+	defer lock.Rollback()
+	if err := lock.Exec(`SELECT pg_advisory_xact_lock(?)`, migrationAdvisoryLockKey).Error; err != nil {
 		return err
 	}
-	defer db.Exec(`SELECT pg_advisory_unlock(?)`, migrationAdvisoryLockKey)
 
 	// Create tracking table
 	if err := db.Exec(`
