@@ -1068,7 +1068,7 @@ const docTemplate = `{
                 "tags": [
                     "owner"
                 ],
-                "summary": "Generate pet access code",
+                "summary": "Generate pet share PIN",
                 "parameters": [
                     {
                         "type": "integer",
@@ -1707,6 +1707,51 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/owner/pets/{id}/share-link": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "owner"
+                ],
+                "summary": "Get pet share-link token",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Pet ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ShareTokenResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/internal_handlers.ErrorResponse"
                         }
@@ -3017,7 +3062,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "4-digit access code",
+                        "description": "6-digit share PIN",
                         "name": "code",
                         "in": "path",
                         "required": true
@@ -3055,6 +3100,13 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Share token (QR link token or PIN)",
+                        "name": "s",
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -3088,6 +3140,13 @@ const docTemplate = `{
                         "description": "Pet ID",
                         "name": "id",
                         "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Share token (QR link token or PIN)",
+                        "name": "s",
+                        "in": "query",
                         "required": true
                     },
                     {
@@ -3618,7 +3677,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_handlers.MessageResponse"
+                            "$ref": "#/definitions/internal_handlers.AppleVerifyResponse"
                         }
                     },
                     "400": {
@@ -3629,6 +3688,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/internal_handlers.ErrorResponse"
                         }
@@ -3770,16 +3835,47 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/subscriptions/return": {
+            "get": {
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "subscriptions"
+                ],
+                "summary": "Card payment return page",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "success or fail (BOG)",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "HTML page",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
         "internal_handlers.AccessCodeResponse": {
             "type": "object",
             "required": [
-                "code"
+                "code",
+                "expires_at"
             ],
             "properties": {
                 "code": {
+                    "type": "string"
+                },
+                "expires_at": {
                     "type": "string"
                 }
             }
@@ -3868,12 +3964,12 @@ const docTemplate = `{
         "internal_handlers.AppleVerifyRequest": {
             "type": "object",
             "required": [
-                "package_id",
                 "pet_id",
                 "signed_transaction"
             ],
             "properties": {
                 "package_id": {
+                    "description": "PackageID is optional: the package is found from the receipt's\nproductId, so a purchase StoreKit re-delivers after a restart can\nbe verified without knowing what the user had selected.",
                     "type": "integer"
                 },
                 "pet_id": {
@@ -3881,6 +3977,20 @@ const docTemplate = `{
                 },
                 "signed_transaction": {
                     "description": "StoreKit 2 JWS signed transaction",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.AppleVerifyResponse": {
+            "type": "object",
+            "required": [
+                "message"
+            ],
+            "properties": {
+                "already_processed": {
+                    "type": "boolean"
+                },
+                "message": {
                     "type": "string"
                 }
             }
@@ -3950,6 +4060,57 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handlers.CertificatePet": {
+            "type": "object",
+            "required": [
+                "cast",
+                "castdate",
+                "chip",
+                "chipd",
+                "color",
+                "date",
+                "id",
+                "name",
+                "pet",
+                "sex",
+                "variety"
+            ],
+            "properties": {
+                "cast": {
+                    "type": "string"
+                },
+                "castdate": {
+                    "type": "string"
+                },
+                "chip": {
+                    "type": "string"
+                },
+                "chipd": {
+                    "type": "string"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "pet": {
+                    "type": "string"
+                },
+                "sex": {
+                    "type": "string"
+                },
+                "variety": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handlers.CertificateResponse": {
             "type": "object",
             "required": [
@@ -3958,22 +4119,81 @@ const docTemplate = `{
             ],
             "properties": {
                 "complex": {
-                    "$ref": "#/definitions/vetapp-backend_internal_models.Procedure"
+                    "$ref": "#/definitions/internal_handlers.CertificateTreatment"
                 },
                 "dehelminization": {
-                    "$ref": "#/definitions/vetapp-backend_internal_models.Procedure"
+                    "$ref": "#/definitions/internal_handlers.CertificateTreatment"
                 },
                 "ectoparasite": {
-                    "$ref": "#/definitions/vetapp-backend_internal_models.Procedure"
+                    "$ref": "#/definitions/internal_handlers.CertificateTreatment"
                 },
                 "owner": {
                     "$ref": "#/definitions/internal_handlers.CertificateOwner"
                 },
                 "pet": {
-                    "$ref": "#/definitions/vetapp-backend_internal_models.Pet"
+                    "$ref": "#/definitions/internal_handlers.CertificatePet"
                 },
                 "rabies": {
-                    "$ref": "#/definitions/vetapp-backend_internal_models.Procedure"
+                    "$ref": "#/definitions/internal_handlers.CertificateTreatment"
+                }
+            }
+        },
+        "internal_handlers.CertificateTreatment": {
+            "type": "object",
+            "required": [
+                "date",
+                "date2",
+                "deh",
+                "ser",
+                "vac",
+                "vac1",
+                "vac2",
+                "vac3",
+                "vac4",
+                "vac5",
+                "vac6",
+                "vac7",
+                "vacn"
+            ],
+            "properties": {
+                "date": {
+                    "type": "string"
+                },
+                "date2": {
+                    "type": "string"
+                },
+                "deh": {
+                    "type": "string"
+                },
+                "ser": {
+                    "type": "string"
+                },
+                "vac": {
+                    "type": "string"
+                },
+                "vac1": {
+                    "type": "string"
+                },
+                "vac2": {
+                    "type": "string"
+                },
+                "vac3": {
+                    "type": "string"
+                },
+                "vac4": {
+                    "type": "string"
+                },
+                "vac5": {
+                    "type": "string"
+                },
+                "vac6": {
+                    "type": "string"
+                },
+                "vac7": {
+                    "type": "string"
+                },
+                "vacn": {
+                    "type": "string"
                 }
             }
         },
@@ -4200,6 +4420,16 @@ const docTemplate = `{
                 "pet": {
                     "type": "string"
                 },
+                "petStatus": {
+                    "description": "PetStatus is how the pet lives: INHABITANT (domestic), STREET,\nADOPTED or WORKMATE.",
+                    "type": "string",
+                    "enum": [
+                        "INHABITANT",
+                        "STREET",
+                        "ADOPTED",
+                        "WORKMATE"
+                    ]
+                },
                 "phone": {
                     "type": "string"
                 },
@@ -4207,6 +4437,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
+                    "description": "Status is ignored: a clinic-registered pet always starts unregistered\n(see Create). Kept so older clients still decode.",
                     "type": "integer"
                 },
                 "uuid": {
@@ -4517,8 +4748,14 @@ const docTemplate = `{
                 "error"
             ],
             "properties": {
+                "code": {
+                    "type": "string"
+                },
                 "error": {
                     "type": "string"
+                },
+                "retry_after": {
+                    "type": "integer"
                 }
             }
         },
@@ -4769,6 +5006,10 @@ const docTemplate = `{
                 "type"
             ],
             "properties": {
+                "email": {
+                    "description": "Email (register only) lets the app learn the address is taken\nbefore an SMS is paid for.",
+                    "type": "string"
+                },
                 "phone": {
                     "type": "string"
                 },
@@ -5716,6 +5957,10 @@ const docTemplate = `{
                 },
                 "pet": {
                     "$ref": "#/definitions/internal_handlers.PublicPetInfo"
+                },
+                "share_token": {
+                    "description": "ShareToken (PIN lookups only) is what the page passes as ` + "`" + `s` + "`" + ` to\nload the history.",
+                    "type": "string"
                 }
             }
         },
@@ -5802,21 +6047,43 @@ const docTemplate = `{
             "required": [
                 "email",
                 "first_name",
-                "last_name",
-                "password"
+                "password",
+                "phone"
             ],
             "properties": {
+                "code": {
+                    "type": "string"
+                },
                 "email": {
                     "type": "string"
                 },
                 "first_name": {
+                    "description": "FirstName is the full display name (\"Given Surname\").",
                     "type": "string"
                 },
                 "group_id": {
+                    "description": "GroupID and Zip are ignored: public sign-up always creates an owner.\nKept so older clients still decode.",
                     "type": "integer"
                 },
-                "last_name": {
+                "idNumber": {
                     "type": "string"
+                },
+                "id_number": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "description": "LastName is the personal ID (legacy column reuse). App builds up\nto 1.0 sent the surname here and the ID as ` + "`" + `idNumber` + "`" + `; when an ID\nfield is present it wins and the surname joins the display name.",
+                    "type": "string"
+                },
+                "otpId": {
+                    "type": "integer"
+                },
+                "otp_code": {
+                    "type": "string"
+                },
+                "otp_id": {
+                    "description": "The register OTP sent to Phone. Older builds used ` + "`" + `otpId` + "`" + ` (a\nstring) and ` + "`" + `code` + "`" + `.",
+                    "type": "integer"
                 },
                 "password": {
                     "type": "string",
@@ -5920,6 +6187,21 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "sex": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.ShareTokenResponse": {
+            "type": "object",
+            "required": [
+                "expires_at",
+                "token"
+            ],
+            "properties": {
+                "expires_at": {
+                    "type": "string"
+                },
+                "token": {
                     "type": "string"
                 }
             }
@@ -6179,92 +6461,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "year": {
-                    "type": "string"
-                }
-            }
-        },
-        "vetapp-backend_internal_models.Pet": {
-            "type": "object",
-            "properties": {
-                "birth": {
-                    "description": "Birthday MM-DD (greeting SMS)",
-                    "type": "string"
-                },
-                "birth2": {
-                    "description": "Subscription expiry",
-                    "type": "string"
-                },
-                "cast": {
-                    "description": "Neutering type",
-                    "type": "string"
-                },
-                "castdate": {
-                    "description": "Neutering date",
-                    "type": "string"
-                },
-                "chip": {
-                    "description": "Microchip number",
-                    "type": "string"
-                },
-                "chipd": {
-                    "description": "Microchip implant date",
-                    "type": "string"
-                },
-                "code": {
-                    "description": "4-digit access code",
-                    "type": "string"
-                },
-                "color": {
-                    "type": "string"
-                },
-                "date": {
-                    "description": "DOB as string (YYYY-MM-DD)",
-                    "type": "string"
-                },
-                "email": {
-                    "description": "Owner email (denormalized)",
-                    "type": "string"
-                },
-                "first_name": {
-                    "description": "Owner name (denormalized)",
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "name": {
-                    "description": "Pet name",
-                    "type": "string"
-                },
-                "pet": {
-                    "description": "Species: ძაღლი, კატა, სხვა",
-                    "type": "string"
-                },
-                "petStatus": {
-                    "description": "INHABITANT, ADOPTED, WORKMATE",
-                    "type": "string"
-                },
-                "phone": {
-                    "description": "Owner phone (denormalized)",
-                    "type": "string"
-                },
-                "sex": {
-                    "type": "string"
-                },
-                "status": {
-                    "description": "1=active, 2+=inactive",
-                    "type": "integer"
-                },
-                "uuid": {
-                    "description": "Owner personal ID (FK to user.last_name)",
-                    "type": "string"
-                },
-                "variety": {
-                    "description": "Breed",
-                    "type": "string"
-                },
-                "vet": {
-                    "description": "Clinic zip code",
                     "type": "string"
                 }
             }

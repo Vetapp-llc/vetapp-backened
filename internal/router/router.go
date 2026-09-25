@@ -153,6 +153,7 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 	r.Post("/api/subscriptions/callback", subHandler.Callback)
 
 	// Public pet profile (no auth — used by QR code scanning)
+	r.Get("/api/subscriptions/return", subHandler.Return)
 	r.Get("/api/public/pets/code/{code}", publicHandler.LookupByCode)
 	r.Get("/api/public/pets/{id}", publicHandler.GetPet)
 	r.Get("/api/public/pets/{id}/procedures", publicHandler.GetPetProcedures)
@@ -328,6 +329,7 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 			// "tp=999 means allergies" hack.
 			r.Get("/pets/{id}/diseases", ownerPortalHandler.Diseases)
 			r.Get("/pets/{id}/code", ownerPortalHandler.GenerateCode)
+			r.Get("/pets/{id}/share-link", ownerPortalHandler.ShareLink)
 			// At-home treatments (owner/homep.php)
 			r.Get("/pets/{id}/home-procedures", ownerPortalHandler.HomeProcedures)
 			r.Post("/pets/{id}/home-procedures", ownerPortalHandler.CreateHomeProcedure)

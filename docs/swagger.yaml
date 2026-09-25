@@ -4,8 +4,11 @@ definitions:
     properties:
       code:
         type: string
+      expires_at:
+        type: string
     required:
     - code
+    - expires_at
     type: object
   internal_handlers.AdminStats:
     properties:
@@ -69,6 +72,10 @@ definitions:
   internal_handlers.AppleVerifyRequest:
     properties:
       package_id:
+        description: |-
+          PackageID is optional: the package is found from the receipt's
+          productId, so a purchase StoreKit re-delivers after a restart can
+          be verified without knowing what the user had selected.
         type: integer
       pet_id:
         type: integer
@@ -76,9 +83,17 @@ definitions:
         description: StoreKit 2 JWS signed transaction
         type: string
     required:
-    - package_id
     - pet_id
     - signed_transaction
+    type: object
+  internal_handlers.AppleVerifyResponse:
+    properties:
+      already_processed:
+        type: boolean
+      message:
+        type: string
+    required:
+    - message
     type: object
   internal_handlers.BreedCount:
     properties:
@@ -125,23 +140,103 @@ definitions:
     - personal_id
     - phone
     type: object
+  internal_handlers.CertificatePet:
+    properties:
+      cast:
+        type: string
+      castdate:
+        type: string
+      chip:
+        type: string
+      chipd:
+        type: string
+      color:
+        type: string
+      date:
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+      pet:
+        type: string
+      sex:
+        type: string
+      variety:
+        type: string
+    required:
+    - cast
+    - castdate
+    - chip
+    - chipd
+    - color
+    - date
+    - id
+    - name
+    - pet
+    - sex
+    - variety
+    type: object
   internal_handlers.CertificateResponse:
     properties:
       complex:
-        $ref: '#/definitions/vetapp-backend_internal_models.Procedure'
+        $ref: '#/definitions/internal_handlers.CertificateTreatment'
       dehelminization:
-        $ref: '#/definitions/vetapp-backend_internal_models.Procedure'
+        $ref: '#/definitions/internal_handlers.CertificateTreatment'
       ectoparasite:
-        $ref: '#/definitions/vetapp-backend_internal_models.Procedure'
+        $ref: '#/definitions/internal_handlers.CertificateTreatment'
       owner:
         $ref: '#/definitions/internal_handlers.CertificateOwner'
       pet:
-        $ref: '#/definitions/vetapp-backend_internal_models.Pet'
+        $ref: '#/definitions/internal_handlers.CertificatePet'
       rabies:
-        $ref: '#/definitions/vetapp-backend_internal_models.Procedure'
+        $ref: '#/definitions/internal_handlers.CertificateTreatment'
     required:
     - owner
     - pet
+    type: object
+  internal_handlers.CertificateTreatment:
+    properties:
+      date:
+        type: string
+      date2:
+        type: string
+      deh:
+        type: string
+      ser:
+        type: string
+      vac:
+        type: string
+      vac1:
+        type: string
+      vac2:
+        type: string
+      vac3:
+        type: string
+      vac4:
+        type: string
+      vac5:
+        type: string
+      vac6:
+        type: string
+      vac7:
+        type: string
+      vacn:
+        type: string
+    required:
+    - date
+    - date2
+    - deh
+    - ser
+    - vac
+    - vac1
+    - vac2
+    - vac3
+    - vac4
+    - vac5
+    - vac6
+    - vac7
+    - vacn
     type: object
   internal_handlers.ChangePasswordRequest:
     properties:
@@ -299,11 +394,24 @@ definitions:
         type: string
       pet:
         type: string
+      petStatus:
+        description: |-
+          PetStatus is how the pet lives: INHABITANT (domestic), STREET,
+          ADOPTED or WORKMATE.
+        enum:
+        - INHABITANT
+        - STREET
+        - ADOPTED
+        - WORKMATE
+        type: string
       phone:
         type: string
       sex:
         type: string
       status:
+        description: |-
+          Status is ignored: a clinic-registered pet always starts unregistered
+          (see Create). Kept so older clients still decode.
         type: integer
       uuid:
         type: string
@@ -522,8 +630,12 @@ definitions:
     type: object
   internal_handlers.ErrorResponse:
     properties:
+      code:
+        type: string
       error:
         type: string
+      retry_after:
+        type: integer
     required:
     - error
     type: object
@@ -698,6 +810,11 @@ definitions:
     type: object
   internal_handlers.OTPSendRequest:
     properties:
+      email:
+        description: |-
+          Email (register only) lets the app learn the address is taken
+          before an SMS is paid for.
+        type: string
       phone:
         type: string
       type:
@@ -1371,6 +1488,11 @@ definitions:
         type: array
       pet:
         $ref: '#/definitions/internal_handlers.PublicPetInfo'
+      share_token:
+        description: |-
+          ShareToken (PIN lookups only) is what the page passes as `s` to
+          load the history.
+        type: string
     type: object
   internal_handlers.PublicProcedureItem:
     properties:
@@ -1429,14 +1551,37 @@ definitions:
     type: object
   internal_handlers.RegisterRequest:
     properties:
+      code:
+        type: string
       email:
         type: string
       first_name:
+        description: FirstName is the full display name ("Given Surname").
         type: string
       group_id:
+        description: |-
+          GroupID and Zip are ignored: public sign-up always creates an owner.
+          Kept so older clients still decode.
         type: integer
-      last_name:
+      id_number:
         type: string
+      idNumber:
+        type: string
+      last_name:
+        description: |-
+          LastName is the personal ID (legacy column reuse). App builds up
+          to 1.0 sent the surname here and the ID as `idNumber`; when an ID
+          field is present it wins and the surname joins the display name.
+        type: string
+      otp_code:
+        type: string
+      otp_id:
+        description: |-
+          The register OTP sent to Phone. Older builds used `otpId` (a
+          string) and `code`.
+        type: integer
+      otpId:
+        type: integer
       password:
         minLength: 1
         type: string
@@ -1447,8 +1592,8 @@ definitions:
     required:
     - email
     - first_name
-    - last_name
     - password
+    - phone
     type: object
   internal_handlers.ReminderPreview:
     properties:
@@ -1514,6 +1659,16 @@ definitions:
     required:
     - count
     - sex
+    type: object
+  internal_handlers.ShareTokenResponse:
+    properties:
+      expires_at:
+        type: string
+      token:
+        type: string
+    required:
+    - expires_at
+    - token
     type: object
   internal_handlers.ShopResponse:
     properties:
@@ -1689,69 +1844,6 @@ definitions:
       total:
         type: string
       year:
-        type: string
-    type: object
-  vetapp-backend_internal_models.Pet:
-    properties:
-      birth:
-        description: Birthday MM-DD (greeting SMS)
-        type: string
-      birth2:
-        description: Subscription expiry
-        type: string
-      cast:
-        description: Neutering type
-        type: string
-      castdate:
-        description: Neutering date
-        type: string
-      chip:
-        description: Microchip number
-        type: string
-      chipd:
-        description: Microchip implant date
-        type: string
-      code:
-        description: 4-digit access code
-        type: string
-      color:
-        type: string
-      date:
-        description: DOB as string (YYYY-MM-DD)
-        type: string
-      email:
-        description: Owner email (denormalized)
-        type: string
-      first_name:
-        description: Owner name (denormalized)
-        type: string
-      id:
-        type: integer
-      name:
-        description: Pet name
-        type: string
-      pet:
-        description: 'Species: ძაღლი, კატა, სხვა'
-        type: string
-      petStatus:
-        description: INHABITANT, ADOPTED, WORKMATE
-        type: string
-      phone:
-        description: Owner phone (denormalized)
-        type: string
-      sex:
-        type: string
-      status:
-        description: 1=active, 2+=inactive
-        type: integer
-      uuid:
-        description: Owner personal ID (FK to user.last_name)
-        type: string
-      variety:
-        description: Breed
-        type: string
-      vet:
-        description: Clinic zip code
         type: string
     type: object
   vetapp-backend_internal_models.Procedure:
@@ -2579,7 +2671,7 @@ paths:
             $ref: '#/definitions/internal_handlers.ErrorResponse'
       security:
       - BearerAuth: []
-      summary: Generate pet access code
+      summary: Generate pet share PIN
       tags:
       - owner
   /owner/pets/{id}/diseases:
@@ -2970,6 +3062,34 @@ paths:
       security:
       - BearerAuth: []
       summary: Get a download link for an attachment
+      tags:
+      - owner
+  /owner/pets/{id}/share-link:
+    get:
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.ShareTokenResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get pet share-link token
       tags:
       - owner
   /owner/visits:
@@ -3783,6 +3903,11 @@ paths:
         name: id
         required: true
         type: integer
+      - description: Share token (QR link token or PIN)
+        in: query
+        name: s
+        required: true
+        type: string
       produces:
       - application/json
       responses:
@@ -3805,6 +3930,11 @@ paths:
         name: id
         required: true
         type: integer
+      - description: Share token (QR link token or PIN)
+        in: query
+        name: s
+        required: true
+        type: string
       - description: Procedure type
         in: query
         name: tp
@@ -3828,7 +3958,7 @@ paths:
   /public/pets/code/{code}:
     get:
       parameters:
-      - description: 4-digit access code
+      - description: 6-digit share PIN
         in: path
         name: code
         required: true
@@ -4157,13 +4287,17 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_handlers.MessageResponse'
+            $ref: '#/definitions/internal_handlers.AppleVerifyResponse'
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/internal_handlers.ErrorResponse'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/internal_handlers.ErrorResponse'
         "500":
@@ -4255,6 +4389,23 @@ paths:
           schema:
             $ref: '#/definitions/internal_handlers.ErrorResponse'
       summary: List subscription packages
+      tags:
+      - subscriptions
+  /subscriptions/return:
+    get:
+      parameters:
+      - description: success or fail (BOG)
+        in: query
+        name: status
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML page
+          schema:
+            type: string
+      summary: Card payment return page
       tags:
       - subscriptions
 securityDefinitions:

@@ -75,12 +75,14 @@ func (s *IPayService) GetToken() (string, error) {
 }
 
 // CreateOrder creates a checkout order on iPay and returns the redirect URL.
-func (s *IPayService) CreateOrder(token string, amount string, petID uint, callbackURL string) (*OrderResponse, error) {
+// returnURL is where iPay sends the customer's browser afterwards; the
+// payment result itself arrives at the callback registered with iPay.
+func (s *IPayService) CreateOrder(token string, amount string, petID uint, returnURL string) (*OrderResponse, error) {
 	shopOrderID := fmt.Sprintf("pet_%d_%d", petID, time.Now().Unix())
 	payload := map[string]interface{}{
 		"intent":         "CAPTURE",
 		"shop_order_id":  shopOrderID,
-		"redirect_url":   callbackURL,
+		"redirect_url":   returnURL,
 		"capture_method": "AUTOMATIC",
 		"locale":         "ka",
 		"items": []map[string]interface{}{

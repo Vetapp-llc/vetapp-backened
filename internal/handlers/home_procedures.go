@@ -44,7 +44,7 @@ func (h *OwnerPortalHandler) ownerPet(r *http.Request) (models.Pet, bool) {
 	if personalID == "" {
 		return pet, false
 	}
-	err := h.db.Where("id = ? AND uuid = ?", chi.URLParam(r, "id"), personalID).First(&pet).Error
+	err := h.db.Where("id = ? AND TRIM(uuid) = ?", chi.URLParam(r, "id"), personalID).First(&pet).Error
 	return pet, err == nil
 }
 
