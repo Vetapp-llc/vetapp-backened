@@ -2,12 +2,14 @@ package handlers
 
 import (
 	cryptorand "crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -97,15 +99,68 @@ type LoginResponse struct {
 }
 
 type RegisterRequest struct {
+	// FirstName is the full display name ("Given Surname").
 	FirstName string `json:"first_name" validate:"required"`
-	LastName  string `json:"last_name" validate:"required"`
-	Email     string `json:"email" validate:"required,email"`
-	Phone     string `json:"phone"`
-	Password  string `json:"password" validate:"required,min=1"`
+	// LastName is the personal ID (legacy column reuse). App builds up
+	// to 1.0 sent the surname here and the ID as `idNumber`; when an ID
+	// field is present it wins and the surname joins the display name.
+	LastName       string `json:"last_name"`
+	IDNumber       string `json:"id_number"`
+	IDNumberLegacy string `json:"idNumber"`
+	Email          string `json:"email" validate:"required,email"`
+	Phone          string `json:"phone" validate:"required"`
+	Password       string `json:"password" validate:"required,min=1"`
+	// The register OTP sent to Phone. Older builds used `otpId` (a
+	// string) and `code`.
+	OTPID       flexUint `json:"otp_id"`
+	OTPIDLegacy flexUint `json:"otpId"`
+	OTPCode     string   `json:"otp_code"`
+	CodeLegacy  string   `json:"code"`
 	// GroupID and Zip are ignored: public sign-up always creates an owner.
 	// Kept so older clients still decode.
 	GroupID int    `json:"group_id"`
 	Zip     string `json:"zip"`
+}
+
+// flexUint decodes a JSON number or a numeric string.
+type flexUint uint
+
+func (f *flexUint) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(strings.TrimSpace(string(b)), `"`)
+	if s == "" || s == "null" {
+		*f = 0
+		return nil
+	}
+	var n uint
+	if _, err := fmt.Sscanf(s, "%d", &n); err != nil {
+		return fmt.Errorf("invalid id %q", s)
+	}
+	*f = flexUint(n)
+	return nil
+}
+
+// personalIDPattern accepts a Georgian personal number (11 digits) or a
+// foreign document number.
+var personalIDPattern = regexp.MustCompile(`^[A-Za-z0-9]{5,20}$`)
+
+// registrationIdentity works out the personal ID and display name from
+// either request shape (see RegisterRequest).
+func registrationIdentity(req RegisterRequest) (personalID, displayName string) {
+	displayName = strings.TrimSpace(req.FirstName)
+	last := strings.TrimSpace(req.LastName)
+	for _, v := range []string{req.IDNumber, req.IDNumberLegacy} {
+		if v = strings.TrimSpace(v); v != "" {
+			personalID = v
+			break
+		}
+	}
+	if personalID == "" {
+		return last, displayName
+	}
+	if last != "" && last != personalID {
+		displayName = strings.TrimSpace(displayName + " " + last)
+	}
+	return personalID, displayName
 }
 
 type RefreshRequest struct {
@@ -181,9 +236,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Only active accounts may sign in. A removed vet keeps a row (with
 	// status F) and several legacy rows can share one address; without
 	// the status filter the lowest id won, disabled or not.
-	if err := h.db.Where("email = ? AND status = ?", req.Email, "T").First(&user).Error; err != nil {
+	// Case-insensitive: phone keyboards capitalise the first letter.
+	if err := h.db.Where("LOWER(TRIM(email)) = LOWER(TRIM(?)) AND status = ?", req.Email, "T").
+		Order("last_login DESC NULLS LAST, id DESC").First(&user).Error; err != nil {
 		log.Warn("login_failed", "email", req.Email, "reason", "user_not_found")
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid credentials"})
+		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid credentials", Code: codeInvalidCredentials})
 		return
 	}
 
@@ -205,7 +262,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		// Generic 401 — never distinguish "user has corrupt ciphertext"
 		// or "wrong password" so attackers can't enumerate accounts.
 		log.Warn("login_failed", "email", req.Email, "reason", "invalid_password")
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid credentials"})
+		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid credentials", Code: codeInvalidCredentials})
 		return
 	}
 
@@ -248,11 +305,39 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	personalID, displayName := registrationIdentity(req)
+	if !personalIDPattern.MatchString(personalID) {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid personal ID", Code: codeInvalidPersonalID})
+		return
+	}
+	phone := normalizePhone(req.Phone)
+	if phone == "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid phone number", Code: codeInvalidPhone})
+		return
+	}
+	email := strings.TrimSpace(req.Email)
+
 	// Check if email already exists
-	var existing models.User
-	if err := h.db.Where("email = ?", req.Email).First(&existing).Error; err == nil {
-		log.Warn("register_failed", "email", req.Email, "reason", "email_exists")
-		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "email already registered"})
+	if h.emailTaken(email) {
+		log.Warn("register_failed", "email", email, "reason", "email_exists")
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "email already registered", Code: codeEmailTaken})
+		return
+	}
+
+	// The phone must be proven with the register code sent to it; the
+	// request used to carry the code but nothing checked it.
+	otpID := uint(req.OTPID)
+	if otpID == 0 {
+		otpID = uint(req.OTPIDLegacy)
+	}
+	otpCode := req.OTPCode
+	if otpCode == "" {
+		otpCode = req.CodeLegacy
+	}
+	otp, status, otpErr := checkOTP(h.db, otpID, otpCode, "register", phone)
+	if otpErr != nil {
+		log.Warn("register_failed", "email", email, "reason", otpErr.Code)
+		writeJSON(w, status, *otpErr)
 		return
 	}
 
@@ -285,25 +370,50 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	// Disabled accounts count too: their ID still owns pets. The check
 	// and the insert below share an advisory lock on the ID, so two
 	// simultaneous sign-ups with one ID cannot both pass.
-	personalID := strings.TrimSpace(req.LastName)
 	tx := h.db.Begin()
 	defer tx.Rollback()
 	tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('register|' || ?))`, personalID)
+	// And on the email, so two sign-ups with one address (different IDs)
+	// cannot both pass the check above.
+	tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('register-email|' || LOWER(TRIM(?))))`, email)
+	var emailTaken int64
+	tx.Model(&models.User{}).Where("LOWER(TRIM(email)) = LOWER(TRIM(?))", email).Count(&emailTaken)
+	if emailTaken > 0 {
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "email already registered", Code: codeEmailTaken})
+		return
+	}
 	var taken int64
 	tx.Model(&models.User{}).
 		Where("TRIM(last_name) = ? AND group_id = ?", personalID, models.RoleOwner).
 		Count(&taken)
-	if personalID == "" || taken > 0 {
-		log.Warn("register_failed", "email", req.Email, "reason", "personal_id_in_use")
-		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "an account with this personal ID already exists"})
+	if taken > 0 {
+		log.Warn("register_failed", "email", email, "reason", "personal_id_in_use")
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "an account with this personal ID already exists", Code: codePersonalIDTaken})
+		return
+	}
+	// Clinics register pets under the owner's personal ID and record the
+	// owner's phone on them. Claiming an ID that already has pets needs a
+	// verified phone the clinic has on record for it; otherwise anyone
+	// could type someone else's ID and see their pets. (IDs whose pets
+	// carry no usable phone can't be checked and are let through.)
+	if !phoneOnRecordFor(tx, personalID, phone) {
+		log.Warn("register_failed", "email", email, "reason", "identity_unverified")
+		writeJSON(w, http.StatusConflict, ErrorResponse{
+			Error: "this phone number doesn't match the clinic's records for this personal ID",
+			Code:  codeIdentityUnverified,
+		})
+		return
+	}
+	if !consumeOTP(tx, otp.ID) {
+		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "code expired or already used", Code: codeOTPExpired})
 		return
 	}
 
 	user := models.User{
-		FirstName:    req.FirstName,
+		FirstName:    displayName,
 		LastName:     personalID,
-		Email:        req.Email,
-		Phone:        req.Phone,
+		Email:        email,
+		Phone:        phone,
 		Password:     encryptedBytes,
 		PasswordHash: hash,
 		GroupID:      groupID,
@@ -473,8 +583,12 @@ func (h *AuthHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		updates["first_name"] = *req.FirstName
 	}
 	if req.Phone != nil {
-		// Strip whitespace so we don't store stray spaces from autofill.
-		updates["phone"] = strings.TrimSpace(*req.Phone)
+		phone := normalizePhone(*req.Phone)
+		if phone == "" {
+			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid phone number", Code: codeInvalidPhone})
+			return
+		}
+		updates["phone"] = phone
 	}
 	if req.Address != nil {
 		updates["address"] = strings.TrimSpace(*req.Address)
@@ -578,7 +692,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.First(&user, claims.UserID).Error; err != nil {
 		// Treat as "wrong current password" to avoid information leak.
 		log.Warn("change_password_failed", "user_id", claims.UserID, "reason", "user_not_found")
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "current password is incorrect"})
+		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "current password is incorrect", Code: codeWrongPassword})
 		return
 	}
 
@@ -591,7 +705,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if !currentOK {
 		log.Warn("change_password_failed", "user_id", user.ID, "reason", "invalid_current_password")
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "current password is incorrect"})
+		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "current password is incorrect", Code: codeWrongPassword})
 		return
 	}
 
@@ -948,6 +1062,9 @@ If you didn't request this, you can safely ignore this email.
 type OTPSendRequest struct {
 	Phone string `json:"phone" validate:"required"`
 	Type  string `json:"type" validate:"required,oneof=register recovery"`
+	// Email (register only) lets the app learn the address is taken
+	// before an SMS is paid for.
+	Email string `json:"email"`
 }
 
 // OTPSendResponse is the response after sending an OTP.
@@ -993,21 +1110,41 @@ func (h *AuthHandler) OTPSend(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
-
-	// Per-phone send rate-limit. Both windows must allow.
-	if !otpSendBurstLimiter.Allow(req.Phone) {
-		log.Warn("otp_send_rate_limited", "phone", req.Phone, "reason", "burst")
-		writeJSON(w, http.StatusTooManyRequests, ErrorResponse{Error: "please wait before requesting another code"})
+	phone := normalizePhone(req.Phone)
+	if phone == "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid phone number", Code: codeInvalidPhone})
 		return
 	}
-	if !otpSendDailyLimiter.Allow(req.Phone) {
-		log.Warn("otp_send_rate_limited", "phone", req.Phone, "reason", "daily_cap")
-		writeJSON(w, http.StatusTooManyRequests, ErrorResponse{Error: "daily OTP limit reached"})
+
+	// Answer what we can before spending an SMS.
+	if req.Type == "register" && strings.TrimSpace(req.Email) != "" && h.emailTaken(req.Email) {
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "email already registered", Code: codeEmailTaken})
 		return
+	}
+	if req.Type == "recovery" {
+		var n int64
+		h.db.Model(&models.User{}).Where(phoneMatchSQL+" AND status = ?", phone, phone, "T").Count(&n)
+		if n == 0 {
+			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "no account with this phone number", Code: codeUserNotFound})
+			return
+		}
+	}
+
+	// Per-phone send rate-limit. Both windows must allow.
+	for _, l := range []*middleware.RateLimiter{otpSendBurstLimiter, otpSendDailyLimiter} {
+		if !l.Allow(phone) {
+			wait := int(l.RetryAfter(phone).Seconds()) + 1
+			log.Warn("otp_send_rate_limited", "phone", phone, "retry_after", wait)
+			writeJSON(w, http.StatusTooManyRequests, ErrorResponse{
+				Error: "please wait before requesting another code", Code: codeRateLimited, RetryAfter: wait,
+			})
+			return
+		}
 	}
 
 	// 6-digit code from crypto/rand. The 4-digit code we used to
-	// generate had only 10⁴ entropy, brute-forceable inside the 60s TTL.
+	// generate had only 10⁴ entropy; wrong guesses lock the code after
+	// otpMaxTries.
 	code, err := numericCode(6)
 	if err != nil {
 		log.Error("otp_send_failed", "reason", "rand", "error", err)
@@ -1016,28 +1153,28 @@ func (h *AuthHandler) OTPSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	otp := models.OTP{
-		Phone:     req.Phone,
+		Phone:     phone,
 		Code:      code,
 		Type:      req.Type,
-		ExpiresAt: time.Now().Add(60 * time.Second),
+		ExpiresAt: time.Now().Add(otpLifetime),
 		CreatedAt: time.Now(),
 	}
 
 	if err := h.db.Create(&otp).Error; err != nil {
-		log.Error("otp_send_failed", "phone", req.Phone, "reason", "db_error", "error", err)
+		log.Error("otp_send_failed", "phone", phone, "reason", "db_error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to create OTP"})
 		return
 	}
 
 	// Send SMS
 	msg := fmt.Sprintf("VetApp: თქვენი კოდია %s", code)
-	if err := h.smsService.Send(req.Phone, msg); err != nil {
-		log.Error("otp_send_failed", "phone", req.Phone, "reason", "sms_error", "error", err)
+	if err := h.smsService.Send(smsDestination(phone), msg); err != nil {
+		log.Error("otp_send_failed", "phone", phone, "reason", "sms_error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to send SMS"})
 		return
 	}
 
-	log.Info("otp_sent", "phone", req.Phone, "type", req.Type, "otp_id", otp.ID)
+	log.Info("otp_sent", "phone", phone, "type", req.Type, "otp_id", otp.ID)
 
 	writeJSON(w, http.StatusOK, OTPSendResponse{OTPID: otp.ID})
 }
@@ -1064,34 +1201,19 @@ func (h *AuthHandler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 	// Whole-process verify rate limit (catches OTPID enumeration).
 	if !otpVerifyLimiter.Allow(fmt.Sprintf("%d", req.OTPID)) {
 		log.Warn("otp_verify_rate_limited", "otp_id", req.OTPID)
-		writeJSON(w, http.StatusTooManyRequests, ErrorResponse{Error: "too many attempts"})
+		writeJSON(w, http.StatusTooManyRequests, ErrorResponse{Error: "too many attempts", Code: codeRateLimited, RetryAfter: 60})
 		return
 	}
 
-	var otp models.OTP
-	if err := h.db.First(&otp, req.OTPID).Error; err != nil {
-		log.Warn("otp_verify_failed", "otp_id", req.OTPID, "reason", "not_found")
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid OTP"})
+	// Checking a code does not use it up: the step that needs it
+	// (register, password-reset) consumes it. Marking it used here made
+	// the reset that follows always fail.
+	otp, status, otpErr := checkOTP(h.db, req.OTPID, req.Code, "", "")
+	if otpErr != nil {
+		log.Warn("otp_verify_failed", "otp_id", req.OTPID, "reason", otpErr.Code)
+		writeJSON(w, status, *otpErr)
 		return
 	}
-
-	const maxTries = 5
-	if otp.Used || time.Now().After(otp.ExpiresAt) || otp.Tries >= maxTries {
-		log.Warn("otp_verify_failed", "otp_id", req.OTPID, "reason", "expired_used_or_locked")
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "OTP expired or already used"})
-		return
-	}
-
-	if otp.Code != req.Code {
-		// Increment the wrong-code counter so we lock after maxTries.
-		h.db.Model(&otp).UpdateColumn("tries", gorm.Expr("tries + 1"))
-		log.Warn("otp_verify_failed", "otp_id", req.OTPID, "reason", "wrong_code", "tries", otp.Tries+1)
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid code"})
-		return
-	}
-
-	// Mark as used
-	h.db.Model(&otp).Update("used", true)
 
 	log.Info("otp_verified", "otp_id", req.OTPID, "phone", otp.Phone)
 
@@ -1119,32 +1241,21 @@ func (h *AuthHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify OTP
-	var otp models.OTP
-	if err := h.db.First(&otp, req.OTPID).Error; err != nil {
-		log.Warn("password_reset_failed", "otp_id", req.OTPID, "reason", "otp_not_found")
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid OTP"})
+	otp, status, otpErr := checkOTP(h.db, req.OTPID, req.OTPCode, "recovery", "")
+	if otpErr != nil {
+		log.Warn("password_reset_failed", "otp_id", req.OTPID, "reason", otpErr.Code)
+		writeJSON(w, status, *otpErr)
 		return
 	}
 
-	const maxTries = 5
-	if otp.Used || time.Now().After(otp.ExpiresAt) || otp.Tries >= maxTries {
-		log.Warn("password_reset_failed", "otp_id", req.OTPID, "reason", "otp_locked_or_expired")
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid or expired OTP"})
-		return
-	}
-	if otp.Code != req.OTPCode {
-		h.db.Model(&otp).UpdateColumn("tries", gorm.Expr("tries + 1"))
-		log.Warn("password_reset_failed", "otp_id", req.OTPID, "reason", "otp_wrong_code")
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid or expired OTP"})
-		return
-	}
-
-	// Find user by phone
+	// Find user by phone. Older rows hold "+995…" or "995…"; several
+	// legacy accounts can share a number — reset the one used last.
+	phone := normalizePhone(otp.Phone)
 	var user models.User
-	if err := h.db.Where("phone = ? AND status = ?", otp.Phone, "T").First(&user).Error; err != nil {
+	if err := h.db.Where(phoneMatchSQL+" AND status = ?", phone, phone, "T").
+		Order("last_login DESC NULLS LAST, id DESC").First(&user).Error; err != nil {
 		log.Warn("password_reset_failed", "phone", otp.Phone, "reason", "user_not_found")
-		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "user not found"})
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "user not found", Code: codeUserNotFound})
 		return
 	}
 
@@ -1162,21 +1273,99 @@ func (h *AuthHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.Model(&user).Updates(map[string]interface{}{
-		"password":      encrypted,
-		"password_hash": newHash,
-	}).Error; err != nil {
+	// Using the code and changing the password commit together, so one
+	// code resets one password once.
+	err = h.db.Transaction(func(tx *gorm.DB) error {
+		if !consumeOTP(tx, otp.ID) {
+			return errOTPUsed
+		}
+		return tx.Model(&user).Updates(map[string]interface{}{
+			"password":      encrypted,
+			"password_hash": newHash,
+		}).Error
+	})
+	if err == errOTPUsed {
+		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "code expired or already used", Code: codeOTPExpired})
+		return
+	}
+	if err != nil {
 		log.Error("password_reset_failed", "user_id", user.ID, "reason", "db_error", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to update password"})
 		return
 	}
 
-	// Mark OTP as used
-	h.db.Model(&otp).Update("used", true)
-
 	log.Info("password_reset", "user_id", user.ID, "phone", otp.Phone)
 
 	writeJSON(w, http.StatusOK, MessageResponse{Message: "password reset successfully"})
+}
+
+// otpMaxTries is an OTP's attempt budget: every check (right or wrong)
+// spends one, atomically, so parallel guesses cannot exceed it. A
+// recovery uses two (verify, then reset).
+const otpMaxTries = 8
+
+// otpLifetime is how long a sent code stays valid: long enough to read
+// the SMS and, for recovery, pick a new password (the code is consumed
+// by the reset, not by /otp/verify).
+const otpLifetime = 5 * time.Minute
+
+var errOTPUsed = fmt.Errorf("otp already used")
+
+// checkOTP validates a code for purpose typ ("" = any). A wrong code
+// counts against the OTP. With phone set, the OTP must have been sent to
+// that (normalized) number. On failure it returns the status and body to
+// send.
+func checkOTP(db *gorm.DB, otpID uint, code, typ, phone string) (models.OTP, int, *ErrorResponse) {
+	invalid := &ErrorResponse{Error: "invalid code", Code: codeOTPInvalid}
+	var otp models.OTP
+	if otpID == 0 || strings.TrimSpace(code) == "" || db.First(&otp, otpID).Error != nil {
+		return otp, http.StatusUnauthorized, invalid
+	}
+	if (typ != "" && otp.Type != typ) || (phone != "" && normalizePhone(otp.Phone) != phone) {
+		return otp, http.StatusUnauthorized, invalid
+	}
+	expired := &ErrorResponse{Error: "code expired or already used", Code: codeOTPExpired}
+	// expires_at is compared with a Go time, the way it was written: the
+	// column has no time zone, so NOW() would be off by the session zone.
+	spend := db.Exec(`UPDATE otp_codes SET tries = tries + 1
+		WHERE id = ? AND used = false AND expires_at > ? AND tries < ?`, otp.ID, time.Now(), otpMaxTries)
+	if spend.Error != nil || spend.RowsAffected != 1 {
+		return otp, http.StatusUnauthorized, expired
+	}
+	if subtle.ConstantTimeCompare([]byte(otp.Code), []byte(strings.TrimSpace(code))) != 1 {
+		return otp, http.StatusUnauthorized, invalid
+	}
+	return otp, 0, nil
+}
+
+// consumeOTP marks the OTP used; false if another request got there
+// first or it expired meanwhile.
+func consumeOTP(tx *gorm.DB, id uint) bool {
+	res := tx.Exec(`UPDATE otp_codes SET used = true WHERE id = ? AND used = false AND expires_at > ?`, id, time.Now())
+	return res.Error == nil && res.RowsAffected == 1
+}
+
+// phoneOnRecordFor reports whether phone may claim personalID: true when
+// no pet under the ID has a usable phone, or one of them is this phone.
+func phoneOnRecordFor(db *gorm.DB, personalID, phone string) bool {
+	var phones []string
+	db.Raw(`SELECT DISTINCT phone FROM pets WHERE TRIM(uuid) = ? AND TRIM(COALESCE(phone, '')) <> ''`, personalID).Scan(&phones)
+	usable := false
+	for _, p := range phones {
+		n := normalizePhone(p)
+		if n == phone {
+			return true
+		}
+		usable = usable || n != ""
+	}
+	return !usable
+}
+
+// emailTaken reports whether any account already uses this address.
+func (h *AuthHandler) emailTaken(email string) bool {
+	var n int64
+	h.db.Model(&models.User{}).Where("LOWER(TRIM(email)) = LOWER(TRIM(?))", email).Count(&n)
+	return n > 0
 }
 
 // --- Helpers ---

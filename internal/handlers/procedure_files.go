@@ -102,7 +102,7 @@ func (h *ProcedureFileHandler) ownsPet(r *http.Request, petID string) bool {
 	}
 	var count int64
 	h.db.Model(&models.Pet{}).
-		Where("id = ? AND uuid = ?", petID, personalID).
+		Where("id = ? AND TRIM(uuid) = ?", petID, personalID).
 		Count(&count)
 	return count > 0
 }
@@ -204,6 +204,9 @@ func (h *ProcedureFileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	// DetectContentType appends charset for text types; compare the base.
 	if i := strings.IndexByte(sniffed, ';'); i >= 0 {
 		sniffed = strings.TrimSpace(sniffed[:i])
+	}
+	if sniffed == "application/octet-stream" && isHEIF(head) {
+		sniffed = "image/heic"
 	}
 	if !services.IsAllowedContentType(sniffed) {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{
@@ -373,4 +376,18 @@ func sanitizeFileName(name string) string {
 		name = name[:120]
 	}
 	return name
+}
+
+// isHEIF recognises HEIC/HEIF images (iPhone photos), which
+// http.DetectContentType does not: an ISO-BMFF "ftyp" box whose major
+// brand is one of the HEIF brands.
+func isHEIF(head []byte) bool {
+	if len(head) < 12 || string(head[4:8]) != "ftyp" {
+		return false
+	}
+	switch string(head[8:12]) {
+	case "heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1":
+		return true
+	}
+	return false
 }

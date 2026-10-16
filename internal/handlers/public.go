@@ -3,7 +3,9 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
+	"vetapp-backend/internal/middleware"
 	"vetapp-backend/internal/models"
 
 	"github.com/go-chi/chi/v5"
@@ -46,7 +48,19 @@ type ProcedureCategoryCount struct {
 type PublicPetResponse struct {
 	Pet        PublicPetInfo            `json:"pet"`
 	Categories []ProcedureCategoryCount `json:"categories"`
+	// ShareToken (PIN lookups only) is what the page passes as `s` to
+	// load the history.
+	ShareToken string `json:"share_token,omitempty"`
 }
+
+// PIN guessing limits: per client IP, and overall — lookups made through
+// the web app's server all arrive from Vercel, and X-Forwarded-For can
+// be forged, so the global cap is what bounds a determined attacker
+// (120/min against ~1M PINs, each live for an hour).
+var (
+	publicCodeLimiter       = middleware.NewRateLimiter(10, time.Minute)
+	publicCodeGlobalLimiter = middleware.NewRateLimiter(120, time.Minute)
+)
 
 // procedureTypeNames maps TP codes to canonical Georgian display names.
 //
@@ -83,43 +97,76 @@ var procedureTypeNames = map[int]string{
 // @Tags public
 // @Produce json
 // @Param id path int true "Pet ID"
+// @Param s query string true "Share token (QR link token or PIN)"
 // @Success 200 {object} PublicPetResponse
 // @Failure 404 {object} ErrorResponse
 // @Router /public/pets/{id} [get]
 func (h *PublicHandler) GetPet(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-
-	var pet models.Pet
-	if err := h.db.First(&pet, id).Error; err != nil {
+	pet, ok := h.sharedPet(r)
+	if !ok {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
 		return
 	}
 
-	h.writePetProfile(w, pet)
+	h.writePetProfile(w, pet, "")
 }
 
-// LookupByCode returns public pet info by the 4-digit access code.
+// sharedPet loads the {id} pet if the request carries a live share token
+// for it. Missing, wrong and expired tokens all look like "not found".
+func (h *PublicHandler) sharedPet(r *http.Request) (models.Pet, bool) {
+	var pet models.Pet
+	id := petIDParam(chi.URLParam(r, "id"))
+	if id == 0 || !shareGranted(h.db, r, id) {
+		return pet, false
+	}
+	if err := h.db.First(&pet, id).Error; err != nil {
+		return pet, false
+	}
+	return pet, true
+}
+
+// LookupByCode returns the pet a live 6-digit share PIN opens.
 // @Summary Look up pet by PIN code
 // @Tags public
 // @Produce json
-// @Param code path string true "4-digit access code"
+// @Param code path string true "6-digit share PIN"
 // @Success 200 {object} PublicPetResponse
 // @Failure 404 {object} ErrorResponse
 // @Router /public/pets/code/{code} [get]
 func (h *PublicHandler) LookupByCode(w http.ResponseWriter, r *http.Request) {
+	if !publicCodeLimiter.Allow(r.RemoteAddr) || !publicCodeGlobalLimiter.Allow("all") {
+		wait := max(publicCodeLimiter.RetryAfter(r.RemoteAddr), publicCodeGlobalLimiter.RetryAfter("all"))
+		writeJSON(w, http.StatusTooManyRequests, ErrorResponse{
+			Error: "too many attempts", Code: codeRateLimited, RetryAfter: int(wait.Seconds()) + 1,
+		})
+		return
+	}
 	code := chi.URLParam(r, "code")
-	if len(code) != 4 {
+	if len(code) != 6 {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
 		return
 	}
 
+	var pin struct {
+		PetID     uint
+		ExpiresAt time.Time
+	}
+	h.db.Raw(`SELECT pet_id, expires_at FROM pet_share_tokens WHERE token = ? AND kind = 'pin' AND expires_at > NOW()`, code).
+		Scan(&pin)
 	var pet models.Pet
-	if err := h.db.Where("code = ?", code).First(&pet).Error; err != nil {
+	if pin.PetID == 0 || h.db.First(&pet, pin.PetID).Error != nil {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
 		return
 	}
+	// The page loads the history with a link token that lives as long
+	// as the PIN.
+	grant, err := newLinkToken(h.db, pet.ID, pin.ExpiresAt)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "lookup failed"})
+		return
+	}
 
-	h.writePetProfile(w, pet)
+	h.writePetProfile(w, pet, grant.Token)
 }
 
 // PublicProcedureItem is a single procedure in the public view.
@@ -138,15 +185,14 @@ type PublicProcedureItem struct {
 // @Tags public
 // @Produce json
 // @Param id path int true "Pet ID"
+// @Param s query string true "Share token (QR link token or PIN)"
 // @Param tp query int false "Procedure type"
 // @Success 200 {array} PublicProcedureItem
 // @Failure 404 {object} ErrorResponse
 // @Router /public/pets/{id}/procedures [get]
 func (h *PublicHandler) GetPetProcedures(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-
-	var pet models.Pet
-	if err := h.db.First(&pet, id).Error; err != nil {
+	pet, ok := h.sharedPet(r)
+	if !ok {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
 		return
 	}
@@ -201,7 +247,7 @@ func (h *PublicHandler) GetPetProcedures(w http.ResponseWriter, r *http.Request)
 // Category counts are produced by the shared `buildPetCategories`
 // helper (parallel queries, single source of truth for the tp=999
 // allergy bucket convention).
-func (h *PublicHandler) writePetProfile(w http.ResponseWriter, pet models.Pet) {
+func (h *PublicHandler) writePetProfile(w http.ResponseWriter, pet models.Pet, shareToken string) {
 	petID := strconv.Itoa(int(pet.ID))
 
 	info := PublicPetInfo{
@@ -221,5 +267,6 @@ func (h *PublicHandler) writePetProfile(w http.ResponseWriter, pet models.Pet) {
 	writeJSON(w, http.StatusOK, PublicPetResponse{
 		Pet:        info,
 		Categories: buildPetCategories(h.db, petID),
+		ShareToken: shareToken,
 	})
 }

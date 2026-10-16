@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
@@ -133,7 +132,8 @@ type OwnerProcedureItem struct {
 
 // AccessCodeResponse is the response when generating a new access code.
 type AccessCodeResponse struct {
-	Code string `json:"code" validate:"required"`
+	Code      string    `json:"code" validate:"required"`
+	ExpiresAt time.Time `json:"expires_at" validate:"required"`
 }
 
 // OwnerDiseaseItem is one entry from the `eals` (allergy/disease) table
@@ -316,13 +316,14 @@ func ownerPersonalID(r *http.Request) string {
 	if claims == nil {
 		return ""
 	}
-	return claims.LastName
+	return strings.TrimSpace(claims.LastName)
 }
 
 // verifyPetOwnership checks that the pet belongs to the authenticated owner.
 func (h *OwnerPortalHandler) verifyPetOwnership(petID string, ownerID string) (*models.Pet, error) {
 	var pet models.Pet
-	err := h.db.Where("id = ? AND uuid = ?", petID, ownerID).First(&pet).Error
+	// TRIM: some legacy pets.uuid values carry stray spaces.
+	err := h.db.Where("id = ? AND TRIM(uuid) = ?", petID, ownerID).First(&pet).Error
 	return &pet, err
 }
 
@@ -344,7 +345,7 @@ func (h *OwnerPortalHandler) ListPets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var pets []models.Pet
-	h.db.Where("uuid = ?", personalID).Order("id DESC").Find(&pets)
+	h.db.Where("TRIM(uuid) = ?", personalID).Order("id DESC").Find(&pets)
 
 	items := make([]OwnerPetItem, len(pets))
 	for i, p := range pets {
@@ -822,8 +823,10 @@ func (h *OwnerPortalHandler) Diseases(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
-// GenerateCode creates a new 4-digit access code for the pet.
-// @Summary Generate pet access code
+// GenerateCode issues a one-time 6-digit share PIN for the pet, valid
+// an hour and unique among live PINs (it replaces the pet's previous
+// one). Anyone with the PIN can open the pet's public page.
+// @Summary Generate pet share PIN
 // @Tags owner
 // @Produce json
 // @Security BearerAuth
@@ -842,14 +845,38 @@ func (h *OwnerPortalHandler) GenerateCode(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	code := strconv.Itoa(1000 + rand.Intn(9000))
-
-	if err := h.db.Model(pet).Update("code", code).Error; err != nil {
+	pin, err := issueSharePIN(h.db, pet.ID)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to generate code"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, AccessCodeResponse{Code: code})
+	writeJSON(w, http.StatusOK, AccessCodeResponse{Code: pin.Token, ExpiresAt: pin.ExpiresAt})
+}
+
+// ShareLink returns the token the pet's QR code carries
+// (/{locale}/pet/{id}?s={token}), valid 7 days.
+// @Summary Get pet share-link token
+// @Tags owner
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Pet ID"
+// @Success 200 {object} ShareTokenResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /owner/pets/{id}/share-link [get]
+func (h *OwnerPortalHandler) ShareLink(w http.ResponseWriter, r *http.Request) {
+	pet, err := h.verifyPetOwnership(chi.URLParam(r, "id"), ownerPersonalID(r))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
+		return
+	}
+	link, err := shareLink(h.db, pet.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to create share link"})
+		return
+	}
+	writeJSON(w, http.StatusOK, link)
 }
 
 // Calendar returns upcoming procedures for all owner's pets.
@@ -869,7 +896,7 @@ func (h *OwnerPortalHandler) Calendar(w http.ResponseWriter, r *http.Request) {
 
 	// Get all owner's pet IDs
 	var pets []models.Pet
-	h.db.Where("uuid = ?", personalID).Find(&pets)
+	h.db.Where("TRIM(uuid) = ?", personalID).Find(&pets)
 
 	petIDs := make([]string, len(pets))
 	petNames := make(map[string]string)
@@ -1282,8 +1309,9 @@ func (h *OwnerPortalHandler) DeleteProcedure(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Owners may only delete records they themselves created. Vet-entered
-	// records have a non-empty vetname and are read-only from the owner app.
-	if proc.VetName != "" {
+	// records carry the vet's member id and are read-only from the owner
+	// app. Same rule as the addedByOwner flag (empty or "0").
+	if v := strings.TrimSpace(proc.VetName); v != "" && v != "0" {
 		writeJSON(w, http.StatusForbidden, ErrorResponse{Error: "cannot delete clinic-entered record"})
 		return
 	}

@@ -3,6 +3,7 @@ package itest
 import (
 	"fmt"
 	"net/http"
+	"sync"
 	"testing"
 
 	"vetapp-backend/internal/models"
@@ -11,8 +12,10 @@ import (
 // Codex review #1/#2: public sign-up.
 func TestRegisterIsOwnerOnlyAndPersonalIDUnique(t *testing.T) {
 	reset(t)
+	id, code := registerOTP(t, "555000001")
 	r := call(t, 0, "POST", "/api/auth/register", map[string]interface{}{
 		"first_name": "x", "last_name": "55555555555", "email": "evil@test.ge", "password": "pw", "group_id": 4, "zip": clinicA,
+		"phone": "555000001", "otp_id": id, "otp_code": code,
 	})
 	expect(t, r, http.StatusCreated)
 	var u models.User
@@ -21,8 +24,10 @@ func TestRegisterIsOwnerOnlyAndPersonalIDUnique(t *testing.T) {
 		t.Fatalf("registered with group %d zip %q, want owner with no clinic", u.GroupID, u.Zip)
 	}
 	// The personal ID of an existing owner cannot be registered again.
+	id, code = registerOTP(t, "555000002")
 	expect(t, call(t, 0, "POST", "/api/auth/register", map[string]interface{}{
 		"first_name": "x", "last_name": " " + ownerID, "email": "thief@test.ge", "password": "pw",
+		"phone": "555000002", "otp_id": id, "otp_code": code,
 	}), http.StatusConflict)
 }
 
@@ -157,15 +162,35 @@ func contains(s, sub string) bool {
 func TestRegisterBlocksDisabledOwnerIDAndRaces(t *testing.T) {
 	reset(t)
 	must(t, db.Model(&models.User{}).Where("id = ?", owner).Update("status", "F").Error)
+	id, code := registerOTP(t, "555000003")
 	expect(t, call(t, 0, "POST", "/api/auth/register", map[string]interface{}{
 		"first_name": "x", "last_name": ownerID, "email": "again@test.ge", "password": "pw",
+		"phone": "555000003", "otp_id": id, "otp_code": code,
 	}), http.StatusConflict)
 
+	// One OTP per racer, so only the personal-ID lock decides.
+	type otp struct {
+		id   uint
+		code string
+	}
+	otps := make(chan otp, 10)
+	for n := 0; n < 10; n++ {
+		id, code := registerOTP(t, fmt.Sprintf("55500010%d", n))
+		otps <- otp{id, code}
+	}
+	var mu sync.Mutex
 	i := 0
 	codes := raceN(t, 10, func() resp {
+		mu.Lock()
 		i++
+		n := i
+		mu.Unlock()
+		o := <-otps
+		var phone string
+		db.Raw(`SELECT phone FROM otp_codes WHERE id = ?`, o.id).Scan(&phone)
 		return call(t, 0, "POST", "/api/auth/register", map[string]interface{}{
-			"first_name": "x", "last_name": "77777777777", "email": fmt.Sprintf("race%d-%p@test.ge", i, &i), "password": "pw",
+			"first_name": "x", "last_name": "77777777777", "email": fmt.Sprintf("race%d@test.ge", n), "password": "pw",
+			"phone": phone, "otp_id": o.id, "otp_code": o.code,
 		})
 	})
 	if codes[http.StatusCreated] != 1 {

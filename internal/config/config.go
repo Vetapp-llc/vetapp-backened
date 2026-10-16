@@ -128,7 +128,7 @@ func Load() (*Config, error) {
 		SupabaseURL:        getEnv("SUPABASE_URL", ""),
 		SupabaseServiceKey: getEnv("SUPABASE_SERVICE_KEY", ""),
 		SupabaseBucket:     getEnv("SUPABASE_BUCKET", "procedure-files"),
-		BaseURL:            getEnv("BASE_URL", "http://localhost:8080"),
+		BaseURL:            getEnv("BASE_URL", defaultBaseURL()),
 	}
 
 	// Resolve the active card gateway. Explicit PAYMENT_PROVIDER wins;
@@ -189,4 +189,15 @@ func getEnv(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+// defaultBaseURL is the service's own public URL when BASE_URL is unset:
+// Railway's public domain in production, localhost in development.
+// Production ran without BASE_URL, so payment and email links pointed
+// at http://localhost:8080.
+func defaultBaseURL() string {
+	if d := strings.TrimSpace(os.Getenv("RAILWAY_PUBLIC_DOMAIN")); d != "" {
+		return "https://" + d
+	}
+	return "http://localhost:8080"
 }

@@ -134,7 +134,7 @@ func reset(t *testing.T) {
 	db.Exec(`DELETE FROM sms_runs`)
 	middlewareReset()
 	must(t, db.Exec(`TRUNCATE app_changes, idempotency_keys, memberlogin_members, pets, vaccination, paymethod, shop, prices,
-		eals, alergy, operationdate, homepro, pro, procedure_files, payments_ipay, analysefile RESTART IDENTITY CASCADE`).Error)
+		eals, alergy, operationdate, homepro, pro, procedure_files, payments_ipay, analysefile, otp_codes, pet_share_tokens RESTART IDENTITY CASCADE`).Error)
 	users := []models.User{
 		{ID: vetA, FirstName: "ვეტი ა", LastName: "11111111111", Email: "vet-a@test", Zip: clinicA, GroupID: models.RoleVet, Status: "T"},
 		{ID: vetA2, FirstName: "ვეტი ა2", LastName: "11111111112", Email: "vet-a2@test", Zip: clinicA, GroupID: models.RoleVet, Status: "T"},

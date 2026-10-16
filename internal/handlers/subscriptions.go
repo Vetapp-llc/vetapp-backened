@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"os"
@@ -170,7 +171,7 @@ func (h *SubscriptionHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
 		return
 	}
-	if pet.UUID != claims.LastName {
+	if strings.TrimSpace(pet.UUID) != strings.TrimSpace(claims.LastName) {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
 		return
 	}
@@ -234,7 +235,7 @@ func (h *SubscriptionHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var order *services.OrderResponse
-		order, err = h.ipayService.CreateOrder(token, pkg.Price, req.PetID, callbackURL)
+		order, err = h.ipayService.CreateOrder(token, pkg.Price, req.PetID, h.baseURL+"/api/subscriptions/return?provider=ipay")
 		if err == nil {
 			orderID, redirectURL = order.OrderID, order.RedirectURL
 		}
@@ -461,9 +462,20 @@ func (h *SubscriptionHandler) Callback(w http.ResponseWriter, r *http.Request) {
 
 // AppleVerifyRequest is the request body for verifying an Apple IAP receipt.
 type AppleVerifyRequest struct {
-	PetID             uint   `json:"pet_id" validate:"required"`
-	PackageID         uint   `json:"package_id" validate:"required"`
+	PetID uint `json:"pet_id" validate:"required"`
+	// PackageID is optional: the package is found from the receipt's
+	// productId, so a purchase StoreKit re-delivers after a restart can
+	// be verified without knowing what the user had selected.
+	PackageID         uint   `json:"package_id"`
 	SignedTransaction string `json:"signed_transaction" validate:"required"` // StoreKit 2 JWS signed transaction
+}
+
+// AppleVerifyResponse reports an activation. AlreadyProcessed means this
+// transaction had activated this pet before (a retry): the app should
+// finish the transaction and treat it as success.
+type AppleVerifyResponse struct {
+	Message          string `json:"message" validate:"required"`
+	AlreadyProcessed bool   `json:"already_processed,omitempty"`
 }
 
 // AppleVerify validates an Apple IAP receipt and activates the subscription.
@@ -490,9 +502,10 @@ type AppleVerifyRequest struct {
 // @Produce json
 // @Security BearerAuth
 // @Param body body AppleVerifyRequest true "Apple IAP receipt"
-// @Success 200 {object} MessageResponse
+// @Success 200 {object} AppleVerifyResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /subscriptions/apple-verify [post]
 func (h *SubscriptionHandler) AppleVerify(w http.ResponseWriter, r *http.Request) {
@@ -511,15 +524,8 @@ func (h *SubscriptionHandler) AppleVerify(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
 		return
 	}
-	if pet.UUID != claims.LastName {
+	if strings.TrimSpace(pet.UUID) != strings.TrimSpace(claims.LastName) {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "pet not found"})
-		return
-	}
-
-	// Get package
-	var pkg models.Package
-	if err := h.db.First(&pkg, req.PackageID).Error; err != nil {
-		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "package not found"})
 		return
 	}
 
@@ -557,20 +563,31 @@ func (h *SubscriptionHandler) AppleVerify(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Product ID check — the package the user clicked "buy" on must
-	// match the productId in the signed receipt. Skipped if the package
-	// doesn't have an apple_product_id configured (legacy rows during
-	// rollout); after backfill the audit can flip to fail-closed.
-	if pkg.AppleProductID != "" && txInfo.ProductID != pkg.AppleProductID {
-		log.Warn("apple_verify_wrong_product", "expected", pkg.AppleProductID, "received", txInfo.ProductID)
+	// The package is the one whose apple_product_id is the receipt's
+	// productId — never the client's word, which would let a cheap
+	// receipt buy an expensive package. An explicit package_id must agree.
+	var pkg models.Package
+	if txInfo.ProductID == "" || h.db.Where("apple_product_id = ?", txInfo.ProductID).First(&pkg).Error != nil {
+		log.Warn("apple_verify_unknown_product", "product_id", txInfo.ProductID)
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "package not found"})
+		return
+	}
+	if req.PackageID != 0 && req.PackageID != pkg.ID {
+		log.Warn("apple_verify_wrong_product", "package_id", req.PackageID, "received", txInfo.ProductID)
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "receipt product mismatch"})
 		return
 	}
 
-	// Duplicate guard — same transaction can't activate twice.
+	// Duplicate guard — same transaction can't activate twice. A retry
+	// for the same pet (lost response, StoreKit re-delivery) is a success
+	// so the app can finish the transaction; another pet is refused.
 	var existing models.Subscription
 	if err := h.db.Where("order_id = ? AND provider = 'apple'", txInfo.TransactionID).First(&existing).Error; err == nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "transaction already processed"})
+		if strings.TrimSpace(existing.UUID) == formatUint(req.PetID) {
+			writeJSON(w, http.StatusOK, AppleVerifyResponse{Message: "subscription activated", AlreadyProcessed: true})
+			return
+		}
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "transaction already used for another pet"})
 		return
 	}
 
@@ -599,6 +616,15 @@ func (h *SubscriptionHandler) AppleVerify(w http.ResponseWriter, r *http.Request
 		return tx.Model(&models.Pet{}).Where("id = ?", req.PetID).
 			Updates(map[string]interface{}{"status": 1, "birth2": expiry}).Error
 	})
+	if err != nil && h.db.Where("order_id = ? AND provider = 'apple'", txInfo.TransactionID).First(&existing).Error == nil {
+		// A simultaneous retry of this transaction won the insert.
+		if strings.TrimSpace(existing.UUID) == formatUint(req.PetID) {
+			writeJSON(w, http.StatusOK, AppleVerifyResponse{Message: "subscription activated", AlreadyProcessed: true})
+			return
+		}
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "transaction already used for another pet"})
+		return
+	}
 	if err != nil {
 		log.Error("apple_verify_persist_failed", "transaction_id", txInfo.TransactionID, "error", err)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to record subscription"})
@@ -606,5 +632,35 @@ func (h *SubscriptionHandler) AppleVerify(w http.ResponseWriter, r *http.Request
 	}
 
 	log.Info("apple_verify_success", "transaction_id", txInfo.TransactionID, "pet_id", req.PetID, "expiry", expiry)
-	writeJSON(w, http.StatusOK, MessageResponse{Message: "subscription activated"})
+	writeJSON(w, http.StatusOK, AppleVerifyResponse{Message: "subscription activated"})
+}
+
+// Return is the page the card gateway sends the customer's browser (the
+// app's WebView) to after checkout. The app watches for this path and
+// then confirms the activation itself; the page is for anyone who lands
+// here outside the app. Activation happens in Callback, never here.
+// @Summary Card payment return page
+// @Tags subscriptions
+// @Produce html
+// @Param status query string false "success or fail (BOG)"
+// @Success 200 {string} string "HTML page"
+// @Router /subscriptions/return [get]
+func (h *SubscriptionHandler) Return(w http.ResponseWriter, r *http.Request) {
+	msg := [3]string{"გადახდა მუშავდება. დაბრუნდით VetApp-ის აპლიკაციაში.",
+		"Payment is being processed. Please return to the VetApp app.",
+		"Платёж обрабатывается. Вернитесь в приложение VetApp."}
+	switch r.URL.Query().Get("status") {
+	case "success":
+		msg = [3]string{"გადახდა მიღებულია. დაბრუნდით VetApp-ის აპლიკაციაში.",
+			"Payment received. Please return to the VetApp app.",
+			"Оплата получена. Вернитесь в приложение VetApp."}
+	case "fail":
+		msg = [3]string{"გადახდა ვერ შესრულდა.", "The payment was not completed.", "Платёж не выполнен."}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VetApp</title></head>`+
+		`<body style="font-family:system-ui,sans-serif;text-align:center;padding:48px 16px;color:#0b2545">`+
+		`<h2>VetApp</h2><p>%s</p><p>%s</p><p>%s</p></body></html>`,
+		html.EscapeString(msg[0]), html.EscapeString(msg[1]), html.EscapeString(msg[2]))
 }

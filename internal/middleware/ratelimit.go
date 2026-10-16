@@ -43,6 +43,15 @@ func (l *RateLimiter) Allow(key string) bool {
 	defer l.mu.Unlock()
 
 	now := time.Now()
+	// Keys are phones and IPs; drop expired buckets now and then so the
+	// map can't grow without bound.
+	if len(l.buckets) > 10000 {
+		for k, b := range l.buckets {
+			if now.After(b.reset) {
+				delete(l.buckets, k)
+			}
+		}
+	}
 	b, ok := l.buckets[key]
 	if !ok || now.After(b.reset) {
 		l.buckets[key] = &bucket{count: 1, reset: now.Add(l.window)}
@@ -53,4 +62,19 @@ func (l *RateLimiter) Allow(key string) bool {
 	}
 	b.count++
 	return true
+}
+
+// RetryAfter reports how long until `key` may try again (0 if it may
+// now). It does not consume a token.
+func (l *RateLimiter) RetryAfter(key string) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b, ok := l.buckets[key]
+	if !ok || b.count < l.limit {
+		return 0
+	}
+	if d := time.Until(b.reset); d > 0 {
+		return d
+	}
+	return 0
 }
