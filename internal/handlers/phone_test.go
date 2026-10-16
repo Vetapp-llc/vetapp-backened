@@ -34,3 +34,19 @@ func TestIsHEIF(t *testing.T) {
 		t.Error("mp4 taken for heif")
 	}
 }
+
+func TestSandboxAllowed(t *testing.T) {
+	t.Setenv("APPLE_SANDBOX_EMAILS", "owner.test@vetapp.ge, Review@Example.com")
+	for email, want := range map[string]bool{
+		"owner.test@vetapp.ge": true, "review@example.com": true, " OWNER.TEST@vetapp.ge ": true,
+		"someone@vetapp.ge": false, "": false,
+	} {
+		if got := sandboxAllowed(email); got != want {
+			t.Errorf("sandboxAllowed(%q) = %v, want %v", email, got, want)
+		}
+	}
+	t.Setenv("APPLE_SANDBOX_EMAILS", "")
+	if sandboxAllowed("owner.test@vetapp.ge") {
+		t.Error("empty list must allow nobody")
+	}
+}

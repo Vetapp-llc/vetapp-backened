@@ -556,8 +556,10 @@ func (h *SubscriptionHandler) AppleVerify(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Reject sandbox receipts in production.
-	if prod && txInfo.Environment == "Sandbox" {
+	// Reject sandbox receipts in production, except from the accounts in
+	// APPLE_SANDBOX_EMAILS: App Review buys with a sandbox Apple ID while
+	// using the production backend, and its purchase must go through.
+	if prod && txInfo.Environment == "Sandbox" && !sandboxAllowed(claims.Email) {
 		log.Warn("apple_verify_sandbox_in_prod", "transaction_id", txInfo.TransactionID)
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "sandbox receipt not accepted"})
 		return
@@ -663,4 +665,19 @@ func (h *SubscriptionHandler) Return(w http.ResponseWriter, r *http.Request) {
 		`<body style="font-family:system-ui,sans-serif;text-align:center;padding:48px 16px;color:#0b2545">`+
 		`<h2>VetApp</h2><p>%s</p><p>%s</p><p>%s</p></body></html>`,
 		html.EscapeString(msg[0]), html.EscapeString(msg[1]), html.EscapeString(msg[2]))
+}
+
+// sandboxAllowed reports whether email is in the comma-separated
+// APPLE_SANDBOX_EMAILS list (the App Review demo accounts).
+func sandboxAllowed(email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return false
+	}
+	for _, e := range strings.Split(os.Getenv("APPLE_SANDBOX_EMAILS"), ",") {
+		if strings.ToLower(strings.TrimSpace(e)) == email {
+			return true
+		}
+	}
+	return false
 }
