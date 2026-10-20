@@ -178,3 +178,20 @@ func TestStaffCreateRequiresPhone(t *testing.T) {
 	body["phone"] = "599123456"
 	expect(t, call(t, vetA, "POST", "/api/staff", body), http.StatusCreated)
 }
+
+// The owner total counts personal IDs, like the owners list; the legacy
+// pets.code ("1313" on thousands of pets) used to collapse them.
+func TestClinicStatsCountsOwnersByPersonalID(t *testing.T) {
+	reset(t)
+	for i, uuid := range []string{"01001000001", "01001000002", "01001000002"} {
+		must(t, db.Create(&models.Pet{ID: uint(90020 + i), UUID: uuid, Name: "x", Pet: "ძაღლი", Vet: clinicA, Status: 1, Code: "1313"}).Error)
+	}
+	var s struct{ TotalOwners int }
+	r := call(t, vetA, "GET", "/api/stats/clinic", nil)
+	expect(t, r, http.StatusOK)
+	r.json(t, &s)
+	// petA's owner plus the two new ones.
+	if s.TotalOwners != 3 {
+		t.Fatalf("totalOwners = %d, want 3", s.TotalOwners)
+	}
+}

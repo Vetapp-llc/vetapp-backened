@@ -102,7 +102,10 @@ func (h *StatsHandler) Clinic(w http.ResponseWriter, r *http.Request) {
 		return h.db.Raw(`SELECT TRIM(sex) AS sex, COUNT(*)::int AS count FROM pets WHERE vet = ? AND TRIM(COALESCE(sex,'')) != '' GROUP BY TRIM(sex)`, zip).Scan(&sexDist).Error
 	})
 	g.Go(func() error {
-		return h.db.Raw(`SELECT COUNT(DISTINCT COALESCE(NULLIF(code,''), uuid::text))::int FROM pets WHERE vet = ?`, zip).Scan(&totalOwners).Error
+		// An owner is a personal ID (pets.uuid), as on the owners list.
+		// pets.code is a legacy field PHP fills with "1313", so counting
+		// it reported a few dozen owners for clinics with thousands.
+		return h.db.Raw(`SELECT COUNT(DISTINCT uuid)::int FROM pets WHERE vet = ?`, zip).Scan(&totalOwners).Error
 	})
 	g.Go(func() error {
 		return h.db.Raw(`SELECT COUNT(*)::int FROM vaccination WHERE sk = ?`, zip).Scan(&totalRecords).Error
