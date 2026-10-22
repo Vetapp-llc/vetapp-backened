@@ -250,11 +250,11 @@ func TestStaffManagedByClinicWithSoftRemoval(t *testing.T) {
 	}
 	expect(t, call(t, vetA, "GET", "/api/staff?clinic="+clinicB, nil), http.StatusForbidden)
 
-	r = call(t, vetA, "POST", "/api/staff", map[string]string{"first_name": "ახალი", "last_name": "33333333333", "email": "New@Test.ge", "password": "secret1"})
+	r = call(t, vetA, "POST", "/api/staff", map[string]string{"first_name": "ახალი", "last_name": "33333333333", "email": "New@Test.ge", "phone": "599000111", "password": "secret1"})
 	expect(t, r, http.StatusCreated)
 	var created struct{ ID uint }
 	r.json(t, &created)
-	expect(t, call(t, vetA, "POST", "/api/staff", map[string]string{"first_name": "x", "last_name": "1", "email": "new@test.ge", "password": "secret1"}), http.StatusConflict)
+	expect(t, call(t, vetA, "POST", "/api/staff", map[string]string{"first_name": "x", "last_name": "1", "email": "new@test.ge", "phone": "599000112", "password": "secret1"}), http.StatusConflict)
 
 	// New vet can log in.
 	expect(t, call(t, 0, "POST", "/api/auth/login", map[string]string{"email": "new@test.ge", "password": "secret1"}), http.StatusOK)

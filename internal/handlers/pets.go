@@ -157,11 +157,15 @@ func (h *PetHandler) List(w http.ResponseWriter, r *http.Request) {
 	case chip != "":
 		query = query.Where("TRIM(chip) = ?", chip)
 	default:
-		query = query.Where("vet = ?", claims.Zip)
 		if search := strings.TrimSpace(r.URL.Query().Get("search")); search != "" {
+			// A search covers the pets this clinic has treated, not only
+			// those registered here (see clinicPatientsSQL).
 			like := "%" + search + "%"
-			query = query.Where("name ILIKE ? OR first_name ILIKE ? OR chip ILIKE ? OR phone ILIKE ?",
-				like, like, like, like)
+			query = query.Where(clinicPatientsSQL, claims.Zip, claims.Zip).
+				Where("name ILIKE ? OR first_name ILIKE ? OR chip ILIKE ? OR phone ILIKE ?",
+					like, like, like, like)
+		} else {
+			query = query.Where("vet = ?", claims.Zip)
 		}
 	}
 

@@ -61,6 +61,13 @@ func ownedByCaller(db *gorm.DB, r *http.Request, column string) *gorm.DB {
 	return db.Where(column+" = ?", zip)
 }
 
+// clinicPatientsSQL is the condition for a pet that belongs to a
+// clinic's search: registered there, or treated there at least once. A
+// pet the owner registered in the app (empty vet) or another clinic
+// registered never matched `vet = ?` alone, so a clinic could not find
+// its own walk-in patients by name. Bind the clinic code twice.
+const clinicPatientsSQL = `(pets.vet = ? OR EXISTS (SELECT 1 FROM vaccination v WHERE v.uuid = pets.id::text AND v.sk = ?))`
+
 // isAdmin reports whether the caller is a super admin.
 func isAdmin(r *http.Request) bool {
 	c := middleware.GetClaims(r)

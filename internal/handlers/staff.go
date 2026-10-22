@@ -30,7 +30,7 @@ type CreateStaffRequest struct {
 	FirstName string `json:"first_name" validate:"required"`
 	LastName  string `json:"last_name" validate:"required"`
 	Email     string `json:"email" validate:"required,email"`
-	Phone     string `json:"phone"`
+	Phone     string `json:"phone" validate:"required"`
 	Password  string `json:"password" validate:"required,min=6"`
 }
 
@@ -121,7 +121,7 @@ func (h *StaffHandler) Create(w http.ResponseWriter, r *http.Request) {
 		FirstName:    strings.TrimSpace(req.FirstName),
 		LastName:     strings.TrimSpace(req.LastName),
 		Email:        req.Email,
-		Phone:        req.Phone,
+		Phone:        strings.TrimSpace(req.Phone),
 		Password:     encryptedBytes,
 		PasswordHash: hash,
 		GroupID:      models.RoleVet,

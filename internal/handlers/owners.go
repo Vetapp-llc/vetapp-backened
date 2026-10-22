@@ -43,7 +43,7 @@ type OwnerWithPets struct {
 // @Tags owners
 // @Produce json
 // @Security BearerAuth
-// @Param search query string false "Search by name, phone, email"
+// @Param search query string false "Search by owner or pet name, phone, email, personal ID"
 // @Param page query int false "Page number" default(1)
 // @Param pageSize query int false "Page size" default(20)
 // @Success 200 {object} PaginatedResponse
@@ -74,10 +74,15 @@ func (h *OwnerHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build search condition
-	searchCond := ""
+	// Build search condition. Browsing lists the clinic's registered
+	// pets; a search also covers pets it has treated (clinicPatientsSQL)
+	// and matches the pet's name as well as the owner's.
+	scope := "vet = ?"
 	args := []interface{}{claims.Zip}
+	searchCond := ""
 	if search != "" {
+		scope = clinicPatientsSQL
+		args = append(args, claims.Zip)
 		// Strip leading zeros from search term for uuid numeric comparison
 		// (uuid column is bigint — leading zeros are dropped on storage)
 		trimmed := strings.TrimLeft(search, "0")
@@ -86,14 +91,14 @@ func (h *OwnerHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		like := "%" + search + "%"
 		trimmedLike := "%" + trimmed + "%"
-		searchCond = "AND (first_name ILIKE ? OR phone ILIKE ? OR email ILIKE ? OR uuid::text ILIKE ? OR uuid::text ILIKE ? OR code ILIKE ?)"
-		args = append(args, like, like, like, like, trimmedLike, like)
+		searchCond = "AND (first_name ILIKE ? OR name ILIKE ? OR phone ILIKE ? OR email ILIKE ? OR uuid::text ILIKE ? OR uuid::text ILIKE ? OR code ILIKE ?)"
+		args = append(args, like, like, like, like, like, trimmedLike, like)
 	}
 
 	// Count distinct owners (group by uuid — the owner's actual personal ID)
 	var total int64
 	h.db.Raw(
-		`SELECT COUNT(DISTINCT uuid) FROM pets WHERE vet = ? `+searchCond,
+		`SELECT COUNT(DISTINCT uuid) FROM pets WHERE `+scope+` `+searchCond,
 		args...,
 	).Scan(&total)
 
@@ -114,7 +119,7 @@ func (h *OwnerHandler) List(w http.ResponseWriter, r *http.Request) {
 			MAX(email) AS email,
 			COUNT(*)::int AS pet_count
 		FROM pets
-		WHERE vet = ? `+searchCond+`
+		WHERE `+scope+` `+searchCond+`
 		GROUP BY uuid
 		ORDER BY MAX(first_name) ASC
 		LIMIT ? OFFSET ?`,

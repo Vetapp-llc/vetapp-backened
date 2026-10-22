@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"math/big"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -100,7 +102,10 @@ func (h *StatsHandler) Clinic(w http.ResponseWriter, r *http.Request) {
 		return h.db.Raw(`SELECT TRIM(sex) AS sex, COUNT(*)::int AS count FROM pets WHERE vet = ? AND TRIM(COALESCE(sex,'')) != '' GROUP BY TRIM(sex)`, zip).Scan(&sexDist).Error
 	})
 	g.Go(func() error {
-		return h.db.Raw(`SELECT COUNT(DISTINCT COALESCE(NULLIF(code,''), uuid::text))::int FROM pets WHERE vet = ?`, zip).Scan(&totalOwners).Error
+		// An owner is a personal ID (pets.uuid), as on the owners list.
+		// pets.code is a legacy field PHP fills with "1313", so counting
+		// it reported a few dozen owners for clinics with thousands.
+		return h.db.Raw(`SELECT COUNT(DISTINCT uuid)::int FROM pets WHERE vet = ?`, zip).Scan(&totalOwners).Error
 	})
 	g.Go(func() error {
 		return h.db.Raw(`SELECT COUNT(*)::int FROM vaccination WHERE sk = ?`, zip).Scan(&totalRecords).Error
@@ -540,4 +545,140 @@ func (h *StatsHandler) Admin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, stats)
+}
+
+// --- Clinic Stats for a Range ---
+
+// RangeProcedure is one procedure type's count and revenue in a range.
+type RangeProcedure struct {
+	TP     string `json:"tp" validate:"required"`
+	TPName string `json:"tpname" validate:"required"`
+	Count  int    `json:"count" validate:"required"`
+	Total  string `json:"total" validate:"required"`
+}
+
+// RangeBucket is one day's (or month's) count and revenue.
+type RangeBucket struct {
+	Period string `json:"period" validate:"required"`
+	Count  int    `json:"count" validate:"required"`
+	Total  string `json:"total" validate:"required"`
+}
+
+// RangeClinicStats is a clinic's procedures between two dates,
+// optionally narrowed to some procedure types.
+type RangeClinicStats struct {
+	From  string `json:"from" validate:"required"`
+	To    string `json:"to" validate:"required"`
+	Count int    `json:"count" validate:"required"`
+	Total string `json:"total" validate:"required"`
+	// Procedures are the selected types (all when none were given).
+	Procedures []RangeProcedure `json:"procedures" validate:"required"`
+	// Types lists every type recorded in the range, for the filter.
+	Types []RangeProcedure `json:"types" validate:"required"`
+	// Breakdown is per day for ranges up to 92 days, per month beyond.
+	Breakdown []RangeBucket `json:"breakdown" validate:"required"`
+	ByMonth   bool          `json:"byMonth"`
+}
+
+// maxStatsTypes caps the tp filter; a clinic has a few dozen types.
+const maxStatsTypes = 100
+
+// RangeClinic returns the clinic's procedure counts and revenue between
+// two dates, optionally for some procedure types only.
+// @Summary Get clinic statistics for a date range
+// @Tags stats
+// @Produce json
+// @Security BearerAuth
+// @Param from query string true "First day (YYYY-MM-DD)"
+// @Param to query string true "Last day (YYYY-MM-DD)"
+// @Param tp query string false "Comma-separated procedure types"
+// @Param clinic query string false "Clinic code (admin only)"
+// @Success 200 {object} RangeClinicStats
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Router /stats/clinic/range [get]
+func (h *StatsHandler) RangeClinic(w http.ResponseWriter, r *http.Request) {
+	zip, ok := resolveClinic(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	from, to := q.Get("from"), q.Get("to")
+	if !isISODate(from) || !isISODate(to) || from > to {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "from and to are required (YYYY-MM-DD), from <= to"})
+		return
+	}
+	var tps []string
+	for _, tp := range strings.Split(q.Get("tp"), ",") {
+		if tp = strings.TrimSpace(tp); tp != "" {
+			tps = append(tps, tp)
+		}
+	}
+	if len(tps) > maxStatsTypes {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "too many procedure types"})
+		return
+	}
+
+	fromT, _ := time.Parse("2006-01-02", from)
+	toT, _ := time.Parse("2006-01-02", to)
+	byMonth := toT.Sub(fromT) > 92*24*time.Hour
+	period := "date"
+	if byMonth {
+		period = "LEFT(date, 7)"
+	}
+
+	const revenue = `COALESCE(SUM(CASE WHEN price ~ '^[0-9]+(\.[0-9]+){0,1}$' THEN price::numeric END), 0)::text`
+	base := `FROM vaccination WHERE sk = ? AND date BETWEEN ? AND ?`
+	args := []interface{}{zip, from, to}
+	filtered, fargs := base, args
+	if len(tps) > 0 {
+		filtered = base + ` AND TRIM(tp) IN ?`
+		fargs = append(append([]interface{}{}, args...), tps)
+	}
+
+	var (
+		types, procs []RangeProcedure
+		buckets      []RangeBucket
+	)
+	g := new(errgroup.Group)
+	g.Go(func() error {
+		return h.db.Raw(`SELECT TRIM(tp) AS tp, MAX(TRIM(tpname)) AS tp_name, COUNT(*)::int AS count, `+revenue+` AS total `+
+			base+` GROUP BY TRIM(tp) ORDER BY count DESC`, args...).Scan(&types).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT TRIM(tp) AS tp, MAX(TRIM(tpname)) AS tp_name, COUNT(*)::int AS count, `+revenue+` AS total `+
+			filtered+` GROUP BY TRIM(tp) ORDER BY count DESC`, fargs...).Scan(&procs).Error
+	})
+	g.Go(func() error {
+		return h.db.Raw(`SELECT `+period+` AS period, COUNT(*)::int AS count, `+revenue+` AS total `+
+			filtered+` GROUP BY 1 ORDER BY 1`, fargs...).Scan(&buckets).Error
+	})
+	if err := g.Wait(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to load statistics"})
+		return
+	}
+
+	out := RangeClinicStats{
+		From: from, To: to, ByMonth: byMonth,
+		Procedures: procs, Types: types, Breakdown: buckets, Total: "0",
+	}
+	if out.Procedures == nil {
+		out.Procedures = []RangeProcedure{}
+	}
+	if out.Types == nil {
+		out.Types = []RangeProcedure{}
+	}
+	if out.Breakdown == nil {
+		out.Breakdown = []RangeBucket{}
+	}
+	// Totals come from the buckets, which cover the same rows.
+	sum := new(big.Rat)
+	for _, b := range out.Breakdown {
+		out.Count += b.Count
+		if v, ok := new(big.Rat).SetString(b.Total); ok {
+			sum.Add(sum, v)
+		}
+	}
+	out.Total = strings.TrimSuffix(strings.TrimRight(sum.FloatString(2), "0"), ".")
+	writeJSON(w, http.StatusOK, out)
 }

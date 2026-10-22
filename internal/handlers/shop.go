@@ -49,6 +49,9 @@ type ShopResponse struct {
 	Date    string `json:"date" validate:"required"`
 	Method  string `json:"method"`
 	Comment string `json:"comment"`
+	// Set on sales made from stock (Realize): the product and units.
+	ProductID *uint `json:"productId,omitempty"`
+	Quantity  int   `json:"quantity,omitempty"`
 }
 
 func shopToResponse(s models.Shop) ShopResponse {
@@ -109,8 +112,25 @@ func (h *ShopHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items := make([]ShopResponse, len(sales))
+	ids := make([]uint, len(sales))
 	for i, s := range sales {
 		items[i] = shopToResponse(s)
+		ids[i] = s.ID
+	}
+	// Which of these sales came from stock.
+	if len(ids) > 0 {
+		var links []models.ShopSaleItem
+		h.db.Where("shop_id IN ?", ids).Find(&links)
+		byID := make(map[uint]models.ShopSaleItem, len(links))
+		for _, l := range links {
+			byID[l.ShopID] = l
+		}
+		for i := range items {
+			if l, ok := byID[items[i].ID]; ok {
+				pid := l.ProductID
+				items[i].ProductID, items[i].Quantity = &pid, l.Quantity
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, ShopListResponse{
@@ -257,7 +277,7 @@ func validateSale(name, price, date string) string {
 	return ""
 }
 
-// Delete removes a sale.
+// Delete removes a sale; one made from stock puts its units back.
 // @Summary Delete sale
 // @Tags shop
 // @Produce json
@@ -276,7 +296,26 @@ func (h *ShopHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.Delete(&sale).Error; err != nil {
+	// A sale made from stock returns its units to the product.
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		var item models.ShopSaleItem
+		found := tx.Where("shop_id = ?", sale.ID).Limit(1).Find(&item)
+		if found.Error != nil {
+			return found.Error
+		}
+		if found.RowsAffected > 0 {
+			if err := tx.Model(&models.ShopProduct{}).Where("id = ?", item.ProductID).Updates(map[string]interface{}{
+				"quantity": gorm.Expr("quantity + ?", item.Quantity), "updated_at": gorm.Expr("NOW()"),
+			}).Error; err != nil {
+				return err
+			}
+			if err := tx.Delete(&item).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Delete(&sale).Error
+	})
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to delete sale"})
 		return
 	}
