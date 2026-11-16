@@ -62,6 +62,7 @@ func main() {
 	ipayService := services.NewIPayService(cfg)
 	bogService := services.NewBOGService(cfg)
 	storageService := services.NewStorageService(cfg)
+	services.StartFileDeletionWorker(context.Background(), db, storageService)
 
 	// Setup router with all routes
 	// Daily SMS reminders — only when SMS_DAILY_AT is set (see handlers).

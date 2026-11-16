@@ -593,6 +593,16 @@ definitions:
       total:
         type: string
     type: object
+  internal_handlers.DeleteAccountRequest:
+    properties:
+      confirm:
+        type: boolean
+      current_password:
+        maxLength: 200
+        type: string
+    required:
+    - current_password
+    type: object
   internal_handlers.EctoOptionsResponse:
     properties:
       collars:
@@ -1189,6 +1199,8 @@ definitions:
     type: object
   internal_handlers.PackageResponse:
     properties:
+      apple_product_id:
+        type: string
       duration:
         type: integer
       id:
@@ -1459,6 +1471,34 @@ definitions:
       tpname:
         type: string
     type: object
+  internal_handlers.ProductRequest:
+    properties:
+      name:
+        type: string
+      quantity:
+        type: integer
+      unitPrice:
+        type: string
+    required:
+    - name
+    - unitPrice
+    type: object
+  internal_handlers.ProductResponse:
+    properties:
+      id:
+        type: integer
+      name:
+        type: string
+      quantity:
+        type: integer
+      unitPrice:
+        type: string
+    required:
+    - id
+    - name
+    - quantity
+    - unitPrice
+    type: object
   internal_handlers.PublicPetInfo:
     properties:
       birth:
@@ -1510,6 +1550,92 @@ definitions:
         type: string
       vetName:
         type: string
+    type: object
+  internal_handlers.RangeBucket:
+    properties:
+      count:
+        type: integer
+      period:
+        type: string
+      total:
+        type: string
+    required:
+    - count
+    - period
+    - total
+    type: object
+  internal_handlers.RangeClinicStats:
+    properties:
+      breakdown:
+        description: Breakdown is per day for ranges up to 92 days, per month beyond.
+        items:
+          $ref: '#/definitions/internal_handlers.RangeBucket'
+        type: array
+      byMonth:
+        type: boolean
+      count:
+        type: integer
+      from:
+        type: string
+      procedures:
+        description: Procedures are the selected types (all when none were given).
+        items:
+          $ref: '#/definitions/internal_handlers.RangeProcedure'
+        type: array
+      to:
+        type: string
+      total:
+        type: string
+      types:
+        description: Types lists every type recorded in the range, for the filter.
+        items:
+          $ref: '#/definitions/internal_handlers.RangeProcedure'
+        type: array
+    required:
+    - breakdown
+    - count
+    - from
+    - procedures
+    - to
+    - total
+    - types
+    type: object
+  internal_handlers.RangeProcedure:
+    properties:
+      count:
+        type: integer
+      total:
+        type: string
+      tp:
+        type: string
+      tpname:
+        type: string
+    required:
+    - count
+    - total
+    - tp
+    - tpname
+    type: object
+  internal_handlers.RealizeRequest:
+    properties:
+      comment:
+        type: string
+      date:
+        type: string
+      method:
+        enum:
+        - card
+        - cash
+        type: string
+      productId:
+        type: integer
+      quantity:
+        minimum: 1
+        type: integer
+    required:
+    - date
+    - productId
+    - quantity
     type: object
   internal_handlers.RecordPaymentRequest:
     properties:
@@ -1684,6 +1810,11 @@ definitions:
         type: string
       price:
         type: string
+      productId:
+        description: 'Set on sales made from stock (Realize): the product and units.'
+        type: integer
+      quantity:
+        type: integer
     required:
     - date
     - id
@@ -1766,8 +1897,21 @@ definitions:
       variety:
         type: string
     type: object
+  internal_handlers.UpdateProductRequest:
+    properties:
+      name:
+        type: string
+      quantity:
+        type: integer
+      unitPrice:
+        type: string
+    type: object
   internal_handlers.UserResponse:
     properties:
+      account_deletion_available:
+        type: boolean
+      account_deletion_request_available:
+        type: boolean
       address:
         type: string
       city:
@@ -2273,6 +2417,46 @@ paths:
       tags:
       - auth
   /auth/me:
+    delete:
+      consumes:
+      - application/json
+      parameters:
+      - description: Current password and explicit confirmation
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.DeleteAccountRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete the signed-in owner account
+      tags:
+      - auth
     get:
       produces:
       - application/json
@@ -3115,7 +3299,7 @@ paths:
   /owners:
     get:
       parameters:
-      - description: Search by name, phone, email
+      - description: Search by owner or pet name, phone, email, personal ID
         in: query
         name: search
         type: string
@@ -4113,6 +4297,142 @@ paths:
       summary: Update sale
       tags:
       - shop
+  /shop/products:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.ProductResponse'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: List stock
+      tags:
+      - shop
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Product
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.ProductRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handlers.ProductResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Add product to stock
+      tags:
+      - shop
+  /shop/products/{id}:
+    delete:
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MessageResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete product from stock
+      tags:
+      - shop
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Fields to change
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.UpdateProductRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.ProductResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update product in stock
+      tags:
+      - shop
+  /shop/realize:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Product, units and payment
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.RealizeRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handlers.ShopResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Sell from stock
+      tags:
+      - shop
   /staff:
     get:
       parameters:
@@ -4236,6 +4556,47 @@ paths:
       security:
       - BearerAuth: []
       summary: Get monthly clinic statistics
+      tags:
+      - stats
+  /stats/clinic/range:
+    get:
+      parameters:
+      - description: First day (YYYY-MM-DD)
+        in: query
+        name: from
+        required: true
+        type: string
+      - description: Last day (YYYY-MM-DD)
+        in: query
+        name: to
+        required: true
+        type: string
+      - description: Comma-separated procedure types
+        in: query
+        name: tp
+        type: string
+      - description: Clinic code (admin only)
+        in: query
+        name: clinic
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.RangeClinicStats'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get clinic statistics for a date range
       tags:
       - stats
   /stats/clinic/yearly:
