@@ -158,3 +158,34 @@ the machine, including unrelated projects. Kill by port instead:
 gateway and returns HTML instead of JSON. The replacement (BOG Payments
 API) is implemented but needs credentials — see
 `vetapp-backend/PAYMENTS.md`.
+
+## Version 2.0.0 release gates
+
+The mobile app now uses each package's explicit `apple_product_id` from
+`GET /api/subscriptions/packages`. A missing or ambiguous mapping blocks
+App Store checkout before payment. Verify the live `mprice` rows and map
+the intended packages to `com.vetapp.sub.3month`, `com.vetapp.sub.6month`
+and `com.vetapp.sub.1year` before the release. Card prices remain separate
+from the localized price returned by StoreKit.
+
+Immediate owner account deletion is disabled unless
+`OWNER_ACCOUNT_DELETION_ENABLED=1`. Do not enable it until the legacy
+MySQL account store, related owner data and legacy uploads have been
+retired or included in erasure. `app_changes` prevents a deleted row
+from returning through sync; it does not erase the MySQL source.
+Review the remaining copied legacy tables for account data as part of
+that check. Do not turn this flag on while the legacy system is primary.
+
+Version 2.0.0 instead exposes a manual deletion request when `/auth/me`
+reports `account_deletion_request_available: true`. The signed-in owner
+confirms their password in the app. Migration 022 stores a private,
+idempotent request with a 7-day deadline. The team must check the admin
+portal's Account deletion queue daily, erase both copies and associated
+data, revoke sessions, then email completion to the owner. The queue
+does not perform erasure or send messages. See `ACCOUNT_DELETION.md`.
+
+Migration 021 creates a private retry queue for storage-file removal.
+The worker runs once a minute; storage failures keep items queued.
+The new deletion tests use a disposable local database only. To build
+an empty test schema, use `ITEST_BOOTSTRAP_RELEASE=1` with a localhost
+database named `vetapp_release_test`; no production dump is imported.

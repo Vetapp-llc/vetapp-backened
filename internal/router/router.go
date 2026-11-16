@@ -140,6 +140,9 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 			r.Use(middleware.ActiveAccount(db))
 			r.Get("/me", authHandler.Me)
 			r.Put("/me", authHandler.UpdateMe)
+			r.Delete("/me", authHandler.DeleteAccount)
+			r.Get("/account-deletion-request", authHandler.AccountDeletionRequest)
+			r.Post("/account-deletion-request", authHandler.RequestAccountDeletion)
 			// In-app password rotation (settings → security → change
 			// password). Distinct from the public /auth/password-reset,
 			// which is the "I forgot my password" OTP recovery flow.
@@ -239,6 +242,8 @@ func Setup(db *gorm.DB, authService *services.AuthService, smsService *services.
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(middleware.RequireRole(models.RoleAdmin))
 			r.Get("/members", adminHandler.Members)
+			r.Get("/account-deletion-requests", adminHandler.AccountDeletionRequests)
+			r.Post("/account-deletion-requests/{id}/complete", adminHandler.CompleteAccountDeletion)
 			r.Delete("/members/{id}", adminHandler.DisableMember)
 			r.Get("/transactions", adminHandler.Transactions)
 		})

@@ -170,20 +170,22 @@ type RefreshRequest struct {
 // UserResponse is the public user profile returned by /auth/me. Mirrors
 // the columns the mobile profile screen needs to render.
 type UserResponse struct {
-	ID            uint   `json:"id" validate:"required"`
-	FirstName     string `json:"first_name" validate:"required"`
-	LastName      string `json:"last_name" validate:"required"`
-	Email         string `json:"email" validate:"required"`
-	Phone         string `json:"phone" validate:"required"`
-	Address       string `json:"address"`
-	City          string `json:"city"`
-	CountryID     int    `json:"country_id"`
-	Zip           string `json:"zip" validate:"required"`
-	GroupID       int    `json:"group_id" validate:"required"`
-	CompanyName   string `json:"company_name" validate:"required"`
-	Status        string `json:"status" validate:"required"`
-	EmailVerified bool   `json:"email_verified"`
-	PhoneVerified bool   `json:"phone_verified"`
+	ID                              uint   `json:"id" validate:"required"`
+	FirstName                       string `json:"first_name" validate:"required"`
+	LastName                        string `json:"last_name" validate:"required"`
+	Email                           string `json:"email" validate:"required"`
+	Phone                           string `json:"phone" validate:"required"`
+	Address                         string `json:"address"`
+	City                            string `json:"city"`
+	CountryID                       int    `json:"country_id"`
+	Zip                             string `json:"zip" validate:"required"`
+	GroupID                         int    `json:"group_id" validate:"required"`
+	CompanyName                     string `json:"company_name" validate:"required"`
+	Status                          string `json:"status" validate:"required"`
+	EmailVerified                   bool   `json:"email_verified"`
+	PhoneVerified                   bool   `json:"phone_verified"`
+	AccountDeletionAvailable        bool   `json:"account_deletion_available"`
+	AccountDeletionRequestAvailable bool   `json:"account_deletion_request_available"`
 }
 
 // toUserResponse projects the full User model down to the public
@@ -193,20 +195,22 @@ type UserResponse struct {
 // Swagger doc drifts from reality.
 func toUserResponse(u models.User) UserResponse {
 	return UserResponse{
-		ID:            u.ID,
-		FirstName:     u.FirstName,
-		LastName:      u.LastName,
-		Email:         u.Email,
-		Phone:         u.Phone,
-		Address:       u.Address,
-		City:          u.City,
-		CountryID:     u.CountryID,
-		Zip:           u.Zip,
-		GroupID:       u.GroupID,
-		CompanyName:   u.CompanyName,
-		Status:        u.Status,
-		EmailVerified: u.EmailVerified,
-		PhoneVerified: u.PhoneVerified,
+		ID:                              u.ID,
+		FirstName:                       u.FirstName,
+		LastName:                        u.LastName,
+		Email:                           u.Email,
+		Phone:                           u.Phone,
+		Address:                         u.Address,
+		City:                            u.City,
+		CountryID:                       u.CountryID,
+		Zip:                             u.Zip,
+		GroupID:                         u.GroupID,
+		CompanyName:                     u.CompanyName,
+		Status:                          u.Status,
+		EmailVerified:                   u.EmailVerified,
+		PhoneVerified:                   u.PhoneVerified,
+		AccountDeletionAvailable:        u.IsOwner() && ownerAccountDeletionEnabled(),
+		AccountDeletionRequestAvailable: u.IsOwner(),
 	}
 }
 

@@ -215,6 +215,11 @@ func (s *StorageService) Delete(objectKey string) error {
 		return fmt.Errorf("storage: delete failed: %w", err)
 	}
 	defer resp.Body.Close()
+	// Retrying a completed deletion is successful even if the object
+	// has already disappeared (for example after a worker restart).
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 		return fmt.Errorf("storage: delete status %d: %s", resp.StatusCode, truncateForLog(b))

@@ -96,10 +96,11 @@ func localeFromRequest(r *http.Request) string {
 
 // PackageResponse is the API response for a subscription package.
 type PackageResponse struct {
-	ID       uint   `json:"id" validate:"required"`
-	Name     string `json:"name" validate:"required"`
-	Price    string `json:"price" validate:"required"`
-	Duration int    `json:"duration" validate:"required"`
+	ID             uint   `json:"id" validate:"required"`
+	Name           string `json:"name" validate:"required"`
+	Price          string `json:"price" validate:"required"`
+	Duration       int    `json:"duration" validate:"required"`
+	AppleProductID string `json:"apple_product_id,omitempty"`
 }
 
 // CheckoutRequest is the request body for creating a checkout session.
@@ -137,7 +138,7 @@ func (h *SubscriptionHandler) Packages(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]PackageResponse, len(packages))
 	for i, p := range packages {
-		items[i] = PackageResponse{ID: p.ID, Name: p.Name, Price: p.Price, Duration: p.Duration}
+		items[i] = PackageResponse{ID: p.ID, Name: p.Name, Price: p.Price, Duration: p.Duration, AppleProductID: p.AppleProductID}
 	}
 
 	writeJSON(w, http.StatusOK, items)

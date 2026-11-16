@@ -78,6 +78,11 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	if os.Getenv("ITEST_BOOTSTRAP_RELEASE") == "1" {
+		if err := bootstrapReleaseTestDB(db, dsn); err != nil {
+			panic(err)
+		}
+	}
 	if err := migrations.Run(db); err != nil {
 		panic(err)
 	}
@@ -133,6 +138,7 @@ func reset(t *testing.T) {
 	smsMu.Unlock()
 	db.Exec(`DELETE FROM sms_runs`)
 	middlewareReset()
+	must(t, db.Exec(`TRUNCATE vetapp_private.account_deletion_requests RESTART IDENTITY`).Error)
 	must(t, db.Exec(`TRUNCATE app_changes, idempotency_keys, memberlogin_members, pets, vaccination, paymethod, shop, prices,
 		eals, alergy, operationdate, homepro, pro, procedure_files, payments_ipay, analysefile, otp_codes, pet_share_tokens, shop_products, shop_sale_items RESTART IDENTITY CASCADE`).Error)
 	users := []models.User{

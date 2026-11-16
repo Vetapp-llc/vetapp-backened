@@ -548,6 +548,69 @@ const docTemplate = `{
                         }
                     }
                 }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Delete the signed-in owner account",
+                "parameters": [
+                    {
+                        "description": "Current password and explicit confirmation",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.DeleteAccountRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
             }
         },
         "/auth/otp/send": {
@@ -1809,7 +1872,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Search by name, phone, email",
+                        "description": "Search by owner or pet name, phone, email, personal ID",
                         "name": "search",
                         "in": "query"
                     },
@@ -3285,6 +3348,225 @@ const docTemplate = `{
                 }
             }
         },
+        "/shop/products": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "shop"
+                ],
+                "summary": "List stock",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/internal_handlers.ProductResponse"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "shop"
+                ],
+                "summary": "Add product to stock",
+                "parameters": [
+                    {
+                        "description": "Product",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ProductRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ProductResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/shop/products/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "shop"
+                ],
+                "summary": "Update product in stock",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Product ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to change",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.UpdateProductRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ProductResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "shop"
+                ],
+                "summary": "Delete product from stock",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Product ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.MessageResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/shop/realize": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "shop"
+                ],
+                "summary": "Sell from stock",
+                "parameters": [
+                    {
+                        "description": "Product, units and payment",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.RealizeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ShopResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/shop/{id}": {
             "put": {
                 "security": [
@@ -3577,6 +3859,70 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/internal_handlers.MonthlyClinicStats"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/stats/clinic/range": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "stats"
+                ],
+                "summary": "Get clinic statistics for a date range",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "First day (YYYY-MM-DD)",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Last day (YYYY-MM-DD)",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated procedure types",
+                        "name": "tp",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Clinic code (admin only)",
+                        "name": "clinic",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handlers.RangeClinicStats"
                         }
                     },
                     "400": {
@@ -4691,6 +5037,21 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handlers.DeleteAccountRequest": {
+            "type": "object",
+            "required": [
+                "current_password"
+            ],
+            "properties": {
+                "confirm": {
+                    "type": "boolean"
+                },
+                "current_password": {
+                    "type": "string",
+                    "maxLength": 200
+                }
+            }
+        },
         "internal_handlers.EctoOptionsResponse": {
             "type": "object",
             "required": [
@@ -5533,6 +5894,9 @@ const docTemplate = `{
                 "price"
             ],
             "properties": {
+                "apple_product_id": {
+                    "type": "string"
+                },
                 "duration": {
                     "type": "integer"
                 },
@@ -5914,6 +6278,47 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handlers.ProductRequest": {
+            "type": "object",
+            "required": [
+                "name",
+                "unitPrice"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "quantity": {
+                    "type": "integer"
+                },
+                "unitPrice": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.ProductResponse": {
+            "type": "object",
+            "required": [
+                "id",
+                "name",
+                "quantity",
+                "unitPrice"
+            ],
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "quantity": {
+                    "type": "integer"
+                },
+                "unitPrice": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handlers.PublicPetInfo": {
             "type": "object",
             "properties": {
@@ -5987,6 +6392,128 @@ const docTemplate = `{
                 },
                 "vetName": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_handlers.RangeBucket": {
+            "type": "object",
+            "required": [
+                "count",
+                "period",
+                "total"
+            ],
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "period": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.RangeClinicStats": {
+            "type": "object",
+            "required": [
+                "breakdown",
+                "count",
+                "from",
+                "procedures",
+                "to",
+                "total",
+                "types"
+            ],
+            "properties": {
+                "breakdown": {
+                    "description": "Breakdown is per day for ranges up to 92 days, per month beyond.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handlers.RangeBucket"
+                    }
+                },
+                "byMonth": {
+                    "type": "boolean"
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "from": {
+                    "type": "string"
+                },
+                "procedures": {
+                    "description": "Procedures are the selected types (all when none were given).",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handlers.RangeProcedure"
+                    }
+                },
+                "to": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "string"
+                },
+                "types": {
+                    "description": "Types lists every type recorded in the range, for the filter.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handlers.RangeProcedure"
+                    }
+                }
+            }
+        },
+        "internal_handlers.RangeProcedure": {
+            "type": "object",
+            "required": [
+                "count",
+                "total",
+                "tp",
+                "tpname"
+            ],
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "string"
+                },
+                "tp": {
+                    "type": "string"
+                },
+                "tpname": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handlers.RealizeRequest": {
+            "type": "object",
+            "required": [
+                "date",
+                "productId",
+                "quantity"
+            ],
+            "properties": {
+                "comment": {
+                    "type": "string"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "method": {
+                    "type": "string",
+                    "enum": [
+                        "card",
+                        "cash"
+                    ]
+                },
+                "productId": {
+                    "type": "integer"
+                },
+                "quantity": {
+                    "type": "integer",
+                    "minimum": 1
                 }
             }
         },
@@ -6232,6 +6759,13 @@ const docTemplate = `{
                 },
                 "price": {
                     "type": "string"
+                },
+                "productId": {
+                    "description": "Set on sales made from stock (Realize): the product and units.",
+                    "type": "integer"
+                },
+                "quantity": {
+                    "type": "integer"
                 }
             }
         },
@@ -6348,6 +6882,20 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handlers.UpdateProductRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "quantity": {
+                    "type": "integer"
+                },
+                "unitPrice": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handlers.UserResponse": {
             "type": "object",
             "required": [
@@ -6362,6 +6910,12 @@ const docTemplate = `{
                 "zip"
             ],
             "properties": {
+                "account_deletion_available": {
+                    "type": "boolean"
+                },
+                "account_deletion_request_available": {
+                    "type": "boolean"
+                },
                 "address": {
                     "type": "string"
                 },
