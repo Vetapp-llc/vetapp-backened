@@ -616,8 +616,15 @@ func (h *SubscriptionHandler) AppleVerify(w http.ResponseWriter, r *http.Request
 		if err := tx.Create(&sub).Error; err != nil {
 			return err
 		}
+		// A recovered receipt can arrive after support has extended access.
+		// ISO date strings sort in calendar order.
 		return tx.Model(&models.Pet{}).Where("id = ?", req.PetID).
-			Updates(map[string]interface{}{"status": 1, "birth2": expiry}).Error
+			Updates(map[string]interface{}{
+				"status": 1,
+				"birth2": gorm.Expr(`CASE
+					WHEN birth2 ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' AND birth2 > ? THEN birth2
+					ELSE ? END`, expiry, expiry),
+			}).Error
 	})
 	if err != nil && h.db.Where("order_id = ? AND provider = 'apple'", txInfo.TransactionID).First(&existing).Error == nil {
 		// A simultaneous retry of this transaction won the insert.
