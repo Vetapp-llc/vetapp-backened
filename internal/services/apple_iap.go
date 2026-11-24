@@ -15,6 +15,7 @@ import (
 
 // AppleRootCAPEM is Apple's Root CA - G3 certificate in PEM format.
 // This is used to verify the x5c certificate chain in JWS signed transactions.
+// Source: https://www.apple.com/certificateauthority/AppleRootCA-G3.cer
 const AppleRootCAPEM = `-----BEGIN CERTIFICATE-----
 MIICQzCCAcmgAwIBAgIILcX8iNLFS5UwCgYIKoZIzj0EAwMwZzEbMBkGA1UEAwwS
 QXBwbGUgUm9vdCBDQSAtIEczMSYwJAYDVQQLDB1BcHBsZSBDZXJ0aWZpY2F0aW9u
@@ -23,9 +24,9 @@ MTQwNDMwMTgxOTA2WhcNMzkwNDMwMTgxOTA2WjBnMRswGQYDVQQDDBJBcHBsZSBS
 b290IENBIC0gRzMxJjAkBgNVBAsMHUFwcGxlIENlcnRpZmljYXRpb24gQXV0aG9y
 aXR5MRMwEQYDVQQKDApBcHBsZSBJbmMuMQswCQYDVQQGEwJVUzB2MBAGByqGSM49
 AgEGBSuBBAAiA2IABJjpLz1AcqTtkyJygRMc3RCV8cWjTnHcFBbZDuWmBSp3ZHtf
-TjjTuxxEtX/1H7YyYl3J6YRbTzBPEVoA/VhYDKX1DyxNB0cTddqXl5dvMVztK515
-1Du8SQ0/1P0RA16tlKNDMEEwHQYDVR0OBBYEFLuw3qFYM4iapIqZ3r6966/ayySr
-MA8GA1UdEwEB/wQFMAMBAf8wDwYDVR0PAQH/BAUDAwEGMAoGCCqGSM49BAMDA2gA
+TjjTuxxEtX/1H7YyYl3J6YRbTzBPEVoA/VhYDKX1DyxNB0cTddqXl5dvMVztK517
+IDvYuVTZXpmkOlEKMaNCMEAwHQYDVR0OBBYEFLuw3qFYM4iapIqZ3r6966/ayySr
+MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqGSM49BAMDA2gA
 MGUCMQCD6cHEFl4aXTQY2e3v9GwOAEZLuN+yRhHFD/3meoyhpmvOwgPUnPWTxnS4
 at+qIxUCMG1mihDK1A3UT82NQz60imOlM27jbdoXt2QfyFMm+YhidDkLF1vLUagM
 6BgD56KyKA==
@@ -36,9 +37,9 @@ at+qIxUCMG1mihDK1A3UT82NQz60imOlM27jbdoXt2QfyFMm+YhidDkLF1vLUagM
 // PEM/parse problem surfaces as a per-receipt error instead of a
 // process panic at boot, which would hold up every other endpoint too.
 var (
-	appleRootPool   *x509.CertPool
-	appleRootOnce   sync.Once
-	appleRootErr    error
+	appleRootPool *x509.CertPool
+	appleRootOnce sync.Once
+	appleRootErr  error
 )
 
 func getAppleRootPool() (*x509.CertPool, error) {
@@ -61,16 +62,16 @@ func getAppleRootPool() (*x509.CertPool, error) {
 
 // AppleTransactionInfo contains the decoded fields from a StoreKit 2 signed transaction.
 type AppleTransactionInfo struct {
-	TransactionID       string `json:"transactionId"`
-	OriginalTxID        string `json:"originalTransactionId"`
-	BundleID            string `json:"bundleId"`
-	ProductID           string `json:"productId"`
-	PurchaseDate        int64  `json:"purchaseDate"`
-	ExpiresDate         int64  `json:"expiresDate,omitempty"`
-	Type                string `json:"type"`
-	InAppOwnershipType  string `json:"inAppOwnershipType"`
-	Environment         string `json:"environment"`
-	SignedDate          int64  `json:"signedDate"`
+	TransactionID      string `json:"transactionId"`
+	OriginalTxID       string `json:"originalTransactionId"`
+	BundleID           string `json:"bundleId"`
+	ProductID          string `json:"productId"`
+	PurchaseDate       int64  `json:"purchaseDate"`
+	ExpiresDate        int64  `json:"expiresDate,omitempty"`
+	Type               string `json:"type"`
+	InAppOwnershipType string `json:"inAppOwnershipType"`
+	Environment        string `json:"environment"`
+	SignedDate         int64  `json:"signedDate"`
 }
 
 // VerifyAppleJWS verifies a StoreKit 2 JWS signed transaction.
