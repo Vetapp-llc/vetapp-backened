@@ -1381,6 +1381,34 @@ definitions:
     - sex
     - species
     type: object
+  internal_handlers.PetTransferDecision:
+    properties:
+      action:
+        enum:
+        - accept
+        - decline
+        - cancel
+        type: string
+    required:
+    - action
+    type: object
+  internal_handlers.PetTransferInboxItem:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      incoming:
+        type: boolean
+      pet_name:
+        type: string
+      recipient_name:
+        type: string
+      sender_name:
+        type: string
+      status:
+        type: string
+    type: object
   internal_handlers.PriceResponse:
     properties:
       id:
@@ -1852,6 +1880,35 @@ definitions:
     - last_name
     - phone
     - status
+    type: object
+  internal_handlers.TransferPetRequest:
+    properties:
+      personal_id:
+        type: string
+    required:
+    - personal_id
+    type: object
+  internal_handlers.TransferPetResponse:
+    properties:
+      message:
+        type: string
+      recipient_name:
+        type: string
+      request_id:
+        type: integer
+    required:
+    - message
+    - recipient_name
+    type: object
+  internal_handlers.TransferRecipientResponse:
+    properties:
+      name:
+        type: string
+      personal_id:
+        type: string
+    required:
+    - name
+    - personal_id
     type: object
   internal_handlers.UpdateMeRequest:
     properties:
@@ -2717,6 +2774,58 @@ paths:
       summary: Owner calendar (upcoming procedures)
       tags:
       - owner
+  /owner/pet-transfers:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/internal_handlers.PetTransferInboxItem'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: List transfer requests for the signed-in owner
+      tags:
+      - owner
+  /owner/pet-transfers/{id}:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Transfer request ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Decision
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.PetTransferDecision'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.MessageResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Accept, decline or cancel a pet transfer request
+      tags:
+      - owner
   /owner/pets:
     get:
       produces:
@@ -3274,6 +3383,86 @@ paths:
       security:
       - BearerAuth: []
       summary: Get pet share-link token
+      tags:
+      - owner
+  /owner/pets/{id}/transfer:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Recipient
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handlers.TransferPetRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/internal_handlers.TransferPetResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Request transfer of a pet to another owner
+      tags:
+      - owner
+  /owner/transfer-recipient:
+    get:
+      parameters:
+      - description: Recipient personal ID
+        in: query
+        name: personal_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handlers.TransferRecipientResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Look up a pet transfer recipient by personal ID
       tags:
       - owner
   /owner/visits:
